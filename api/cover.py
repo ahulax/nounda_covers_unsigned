@@ -8,9 +8,12 @@ Make (S31) calls this once. Everything slow or fiddly happens here, not in Make:
   5. upload portrait + cover to Cloudinary
   6. return { portrait_url, thumbnail_url }
 
-Request body:
-  { "record_id": "rec…", "cover_concept": {...} | "json string", "title": "…",
-    "dry_run": false }          # dry_run: skip generation, composite on the reference still
+Request body (normal path — Make generates the portrait, this composites it):
+  { "record_id": "rec…", "portrait_url": "https://…", "cover_concept": {...} | "json string" }
+
+Other modes:
+  "dry_run": true    composite onto the bundled reference still. Free, no generation.
+  (omit both)        generate the portrait here via PiAPI, then composite.
 
 Env vars (Vercel → Settings → Environment Variables):
   PIAPI_KEY                 PiAPI API key
@@ -159,13 +162,25 @@ def upload(img_bytes, public_id):
 
 
 def handle(payload):
+    """Three modes, in priority order:
+
+    1. portrait_url supplied  -> composite only. THIS IS THE NORMAL PATH: Make generates the
+       portrait with the native PiAPI module (so the prompt stays editable in Make) and passes
+       the resulting URL here.
+    2. dry_run: true          -> composite onto the bundled reference still. Free, instant,
+       for checking layout changes.
+    3. neither                -> generate here via PiAPI, then composite. Fallback for
+       running the whole thing headless.
+    """
     concept = payload.get("cover_concept") or {}
     if isinstance(concept, str):
         concept = json.loads(concept)
     record_id = payload.get("record_id") or "cover"
     stamp = int(time.time())
 
-    if payload.get("dry_run"):
+    if payload.get("portrait_url"):
+        portrait_url = payload["portrait_url"]
+    elif payload.get("dry_run"):
         portrait_url = REFERENCE_URL
     else:
         portrait_url = generate_portrait(concept)
