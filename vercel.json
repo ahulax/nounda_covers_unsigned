@@ -1,0 +1,11 @@
+{
+  "functions": {
+    "api/cover.py": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/assets/(.*)", "destination": "/assets/$1" }
+  ]
+}
