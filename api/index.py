@@ -25,13 +25,18 @@ import base64
 import io
 import json
 import os
+import sys
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 
 from PIL import Image
 
-from _render import render_cover
+# Vercel's Python runtime does not put the entrypoint's own directory on sys.path,
+# so a plain `from _render import …` raises ModuleNotFoundError at cold start.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from _render import render_cover  # noqa: E402
 
 PIAPI_KEY = os.environ.get("PIAPI_KEY", "")
 CLOUD = os.environ.get("CLOUDINARY_CLOUD", "")
