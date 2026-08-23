@@ -51,20 +51,29 @@ PIAPI_TASK = "https://api.piapi.ai/api/v1/task"
 POLL_SECONDS = 3
 POLL_MAX = 15  # ~45s ceiling, inside Vercel's 60s function limit
 
-# The guide's guardrails, applied to every generation.
+# The guide's guardrails, applied to every generation. Two hard-won lessons baked in:
+# (1) naming a setting (e.g. "library") makes the model reach for an associative prop
+#     (a book) unless explicitly forbidden -> the no-props line is load-bearing.
+# (2) the reference still shows one outfit, so without an explicit instruction to vary
+#     it the identity-lock silently locks the wardrobe too.
 GUARDRAILS = (
-    "editorial photography, warm muted palette, natural window light, matte film look, "
-    "upper body, subject positioned on the RIGHT side of the frame with clean empty space "
-    "on the LEFT for text, shallow depth of field. "
-    "No text, no words, no logos, no flags, no money, no passports, no handshakes, "
-    "not glossy stock photography."
+    "He is wearing different smart-casual clothing than the reference photo, such as a "
+    "fine knit sweater, a plain shirt with no jacket and sleeves rolled up, or a different "
+    "dark blazer, never the same exact jacket-and-shirt combination as the reference every "
+    "time. His hands are empty and relaxed, or gesturing naturally as if explaining "
+    "something. He is NOT holding a book, papers, a pen, a folder, or any object of any "
+    "kind. Editorial photography, warm muted palette, natural window light, matte film "
+    "look, photorealistic with natural skin texture, upper body, subject positioned on the "
+    "RIGHT side of the frame with clean empty space on the LEFT for text, shallow depth of "
+    "field. No text, no words, no logos, no flags, no money, no passports, no handshakes, "
+    "not glossy stock photography, not an illustration."
 )
 
 EXPRESSION_PROMPT = {
-    "serious · concerned": "a serious, concerned expression, brow slightly drawn, direct eye contact",
-    "focused · surprise": "a focused expression with a flicker of surprise, eyebrows slightly raised",
-    "warm · reassuring": "a warm, reassuring expression, faint confident smile",
-    "composed · direct": "a composed, authoritative expression, calm and direct",
+    "serious · concerned": "a serious, concerned expression, subtle and natural, not exaggerated",
+    "focused · surprise": "a focused expression with a subtle flicker of surprise, natural not exaggerated",
+    "warm · reassuring": "a warm, reassuring expression, a faint natural smile",
+    "composed · direct": "a composed, authoritative expression, calm and direct, natural not exaggerated",
 }
 
 SETTING_PROMPT = {
