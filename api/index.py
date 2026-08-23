@@ -27,6 +27,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 
@@ -85,11 +86,25 @@ def build_prompt(concept):
     )
 
 
+USER_AGENT = "nounda-cover/1.0 (+https://github.com/ahulax/nounda_covers_unsigned)"
+
+
+def _urlopen(req, timeout):
+    """urlopen wrapper that always sets a real User-Agent (CDNs/APIs commonly 403
+    the default Python-urllib UA) and surfaces the response body on HTTPError."""
+    req.add_header("User-Agent", USER_AGENT)
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")[:500]
+        raise RuntimeError(f"HTTP {e.code} {e.reason} for {req.full_url}: {body}") from e
+
+
 def _post_json(url, payload, headers):
     req = urllib.request.Request(
         url, data=json.dumps(payload).encode(), headers=headers, method="POST"
     )
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with _urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode())
 
 
@@ -120,7 +135,7 @@ def generate_portrait(concept):
     for _ in range(POLL_MAX):
         time.sleep(POLL_SECONDS)
         req = urllib.request.Request(f"{PIAPI_TASK}/{task_id}", headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with _urlopen(req, timeout=30) as r:
             body = json.loads(r.read().decode())
         data = body.get("data") or body
         status = str(data.get("status", "")).lower()
@@ -135,7 +150,8 @@ def generate_portrait(concept):
 
 
 def fetch_image(url):
-    with urllib.request.urlopen(url, timeout=45) as r:
+    req = urllib.request.Request(url)
+    with _urlopen(req, timeout=45) as r:
         return Image.open(io.BytesIO(r.read()))
 
 
@@ -162,7 +178,7 @@ def upload(img_bytes, public_id):
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=60) as r:
+    with _urlopen(req, timeout=60) as r:
         return json.loads(r.read().decode())["secure_url"]
 
 
