@@ -28,9 +28,11 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 
+import boto3
 from PIL import Image
 
 # Vercel's Python runtime does not put the entrypoint's own directory on sys.path,
@@ -191,6 +193,81 @@ def upload(img_bytes, public_id):
         return json.loads(r.read().decode())["secure_url"]
 
 
+# --- /api/video-url: mint a fresh presigned S3 URL on demand -------------------
+# Vercel bundles this whole project into a SINGLE Python Lambda (confirmed via
+# the deployment's lambdaRuntimeStats, which reports exactly one "python"
+# runtime no matter how many separate entries vercel.json's `functions` key
+# lists) and routes every /api/* request into it. So a second file — even a
+# more specific nested one like api/video-url/index.py — is never actually
+# invoked; do_GET below has to dispatch on self.path itself instead of relying
+# on Vercel to pick a different file.
+#
+# Fixes the "S3 URL expired" bug: presigned S3 URLs are hard-capped at 7 days
+# by AWS, but a video can sit in "Ready to publish" for longer than that
+# before S14 runs. This mints a FRESH URL at the moment of use by reading the
+# record's stored URL only for its bucket+key (the signature/expiry portion
+# is discarded, so a long-stale stored URL is still a valid pointer to the
+# right file) and re-signing it with a new 7-day window.
+#
+#   GET /api/video-url?record_id=recLKh7RP1HO5yLrO             -> 302 redirect
+#   GET /api/video-url?record_id=recLKh7RP1HO5yLrO&format=json -> {"video_url": "..."}
+
+AIRTABLE_PAT = os.environ.get("AIRTABLE_PAT", "")
+AWS_REGION = os.environ.get("REMOTION_AWS_REGION", "us-east-1")
+AWS_ACCESS_KEY_ID = os.environ.get("REMOTION_AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = os.environ.get("REMOTION_AWS_SECRET_ACCESS_KEY", "")
+
+VIDEO_BASE_ID = "appraw1aDLqrHLY7q"
+VIDEO_TABLE_ID = "tbliFOuhLJF1x4CmV"  # Video Production
+VIDEO_FIELD_NAME = "Final Video URL"
+VIDEO_URL_EXPIRES_IN = 604800  # 7 days, AWS's hard ceiling for SigV4 presigned URLs
+
+
+def _fetch_stored_video_url(record_id: str) -> str:
+    if not AIRTABLE_PAT:
+        raise RuntimeError("AIRTABLE_PAT is not set")
+    url = f"https://api.airtable.com/v0/{VIDEO_BASE_ID}/{VIDEO_TABLE_ID}/{record_id}"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {AIRTABLE_PAT}"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Airtable fetch failed: {e.code} {e.read().decode()[:300]}") from e
+    stored = (data.get("fields") or {}).get(VIDEO_FIELD_NAME)
+    if not stored:
+        raise RuntimeError(f"record {record_id} has no '{VIDEO_FIELD_NAME}' value")
+    return stored
+
+
+def _bucket_and_key(stored_url: str):
+    """Extract bucket + key from either URL shape S3 has produced for us:
+    https://<bucket>.s3.<region>.amazonaws.com/<key>?...  (boto3 virtual-hosted)
+    https://<bucket>.s3.amazonaws.com/<key>?...           (legacy virtual-hosted)
+    Signature/expiry query params are discarded — only bucket+key survive.
+    """
+    parsed = urllib.parse.urlparse(stored_url)
+    host = parsed.netloc
+    bucket = host.split(".s3.")[0].split(".s3")[0]
+    key = urllib.parse.unquote(parsed.path.lstrip("/"))
+    if not bucket or not key:
+        raise RuntimeError(f"could not parse bucket/key from stored URL host={host!r} path={parsed.path!r}")
+    return bucket, key
+
+
+def fresh_video_url_for(record_id: str) -> str:
+    stored = _fetch_stored_video_url(record_id)
+    bucket, key = _bucket_and_key(stored)
+    s3 = boto3.client(
+        "s3",
+        region_name=AWS_REGION,
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    )
+    return s3.generate_presigned_url(
+        "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=VIDEO_URL_EXPIRES_IN
+    )
+
+
 def handle(payload):
     """Three modes, in priority order:
 
@@ -243,8 +320,42 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/api/video-url":
+            self._video_url()
+            return
         body = json.dumps({"ok": True, "reference": REFERENCE_URL}).encode()
         self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _video_url(self):
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        record_id = (qs.get("record_id") or [""])[0]
+        fmt = (qs.get("format") or ["redirect"])[0]
+
+        if not record_id:
+            self._json(400, {"error": "missing ?record_id="})
+            return
+        try:
+            url = fresh_video_url_for(record_id)
+        except Exception as exc:
+            self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            return
+
+        if fmt == "json":
+            self._json(200, {"video_url": url})
+        else:
+            self.send_response(302)
+            self.send_header("Location", url)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    def _json(self, code, payload):
+        body = json.dumps(payload).encode()
+        self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
