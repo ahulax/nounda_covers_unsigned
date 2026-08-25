@@ -4,6 +4,10 @@
       "memory": 1024,
       "maxDuration": 60,
       "includeFiles": "assets/**"
+    },
+    "api/video-url.py": {
+      "memory": 256,
+      "maxDuration": 15
     }
   }
 }
