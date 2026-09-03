@@ -40,6 +40,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _render import render_cover  # noqa: E402
+from _broll import select_broll  # noqa: E402
 
 PIAPI_KEY = os.environ.get("PIAPI_KEY", "")
 CLOUD = os.environ.get("CLOUDINARY_CLOUD", "")
@@ -307,7 +308,14 @@ class handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("content-length") or 0)
             payload = json.loads(self.rfile.read(length) or b"{}")
-            result = handle(payload)
+            if urllib.parse.urlparse(self.path).path == "/api/broll":
+                result = select_broll(
+                    payload.get("queries") or [],
+                    per_segment=int(payload.get("per_segment") or 8),
+                    scene_seconds=payload.get("scene_seconds") or {},
+                )
+            else:
+                result = handle(payload)
             code = 200
         except Exception as exc:  # surface the reason to Make instead of a bare 500
             result = {"error": f"{type(exc).__name__}: {exc}"}
