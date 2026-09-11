@@ -20,17 +20,17 @@
  *
  * Request body:
  *   {
+ *     "record_id": "recLKh7RP1HO5yLrO",   Video Production record -- this endpoint fetches
+ *                                          the segments' Video URL + Analysis JSON fields
+ *                                          directly from Airtable rather than having Make
+ *                                          pass the raw analysis text through: that field is
+ *                                          a multi-KB JSON blob full of quotes/newlines/
+ *                                          backslashes that would break Make's hand-built
+ *                                          JSON string templates, unlike B/C's short caption
+ *                                          text. Same reasoning /api/video-url already uses.
  *     "clips": [
- *       {
- *         "video_url": "https://res.cloudinary.com/.../cold_open.mp4",
- *         "start": 0,              seconds, trim start within the source clip
- *         "end": 10.36,             seconds, trim end within the source clip
- *         "analysis_json": "..."    RAW Gemini analysis field text, verbatim from Airtable
- *                                   (the outer {candidates:[...]} wrapper) -- this endpoint
- *                                   does its own parsing/sanitizing/word-filtering; Make
- *                                   just passes the field through untouched.
- *       },
- *       ... 1-3 clips ...
+ *       { "segment": "cold_open", "start": 0, "end": 10.36 },
+ *       ... 1-3 clips, segment one of cold_open/part_1_intro/part_2_intro/part_3_intro/closing ...
  *     ]
  *   }
  * Response: { "output_url": "https://res.cloudinary.com/..." }
@@ -40,19 +40,34 @@ const path = require("path");
 const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
 const {
-  run, uploadToCloudinary, fetchChunkCaptionPng,
+  run, uploadToCloudinary, fetchChunkCaptionPng, fetchAirtableRecord,
   parseSegmentAnalysis, wordsInWindow, chunkWords,
 } = require("../lib/shortform_utils");
 
 const MAX_CLIPS = 3;
 const MAX_CLIP_SECONDS = 60;
 
-async function renderClip(workDir, index, clip) {
-  const { video_url: videoUrl, start, end, analysis_json: analysisJson } = clip;
+const VIDEO_BASE_ID = "appraw1aDLqrHLY7q";
+const VIDEO_TABLE_ID = "tbliFOuhLJF1x4CmV"; // Video Production
+const SEGMENT_FIELDS = {
+  cold_open: { url: "Cold Open Video URL", analysis: "Cold Open Analysis JSON" },
+  part_1_intro: { url: "Part 1 Intro Video URL", analysis: "Part 1 Intro Analysis JSON" },
+  part_2_intro: { url: "Part 2 Intro Video URL", analysis: "Part 2 Intro Analysis JSON" },
+  part_3_intro: { url: "Part 3 Intro Video URL", analysis: "Part 3 Intro Analysis JSON" },
+  closing: { url: "Closing Video URL", analysis: "Closing Analysis JSON" },
+};
+
+async function renderClip(workDir, index, clip, fields) {
+  const { segment, start, end } = clip;
+  const fieldNames = SEGMENT_FIELDS[segment];
+  if (!fieldNames) throw new Error(`clips[${index}]: unknown segment "${segment}"`);
+  const videoUrl = fields[fieldNames.url];
+  if (!videoUrl) throw new Error(`clips[${index}]: record has no ${fieldNames.url}`);
+
   const duration = Math.min(end - start, MAX_CLIP_SECONDS);
   if (!(duration > 0)) throw new Error(`clips[${index}]: end must be greater than start`);
 
-  const analysis = parseSegmentAnalysis(analysisJson);
+  const analysis = parseSegmentAnalysis(fields[fieldNames.analysis]);
   const transcript = analysis && Array.isArray(analysis.transcript) ? analysis.transcript : [];
   const shiftedWords = wordsInWindow(transcript, start, end);
   const chunks = chunkWords(shiftedWords);
@@ -108,15 +123,19 @@ module.exports = async (req, res) => {
   }
 
   const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
-  const { clips } = body;
+  const { record_id: recordId, clips } = body;
 
+  if (!recordId) {
+    res.status(400).json({ error: "record_id is required" });
+    return;
+  }
   if (!Array.isArray(clips) || clips.length < 1 || clips.length > MAX_CLIPS) {
-    res.status(400).json({ error: `clips must be an array of 1-${MAX_CLIPS} {video_url, start, end, analysis_json} items` });
+    res.status(400).json({ error: `clips must be an array of 1-${MAX_CLIPS} {segment, start, end} items` });
     return;
   }
   for (const [i, c] of clips.entries()) {
-    if (!c || !c.video_url || typeof c.start !== "number" || typeof c.end !== "number") {
-      res.status(400).json({ error: `clips[${i}] is missing video_url, start, or end` });
+    if (!c || !c.segment || typeof c.start !== "number" || typeof c.end !== "number") {
+      res.status(400).json({ error: `clips[${i}] is missing segment, start, or end` });
       return;
     }
   }
@@ -126,7 +145,8 @@ module.exports = async (req, res) => {
   const listPath = path.join(workDir, "list.txt");
 
   try {
-    const segmentPaths = await Promise.all(clips.map((c, i) => renderClip(workDir, i, c)));
+    const fields = await fetchAirtableRecord(VIDEO_BASE_ID, VIDEO_TABLE_ID, recordId);
+    const segmentPaths = await Promise.all(clips.map((c, i) => renderClip(workDir, i, c, fields)));
 
     const listContent = segmentPaths.map((p) => `file '${p}'`).join("\n");
     await fs.writeFile(listPath, listContent);
