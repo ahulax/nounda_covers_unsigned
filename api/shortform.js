@@ -25,70 +25,13 @@
  *                             AND video as the same "video" resource type, so the preset
  *                             S12 already uses for narration uploads works here unchanged.
  */
-const { execFile } = require("child_process");
 const fs = require("fs/promises");
 const path = require("path");
 const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
-const ffprobePath = require("ffprobe-static").path;
+const { run, probeDuration, fetchCaptionPng, uploadToCloudinary } = require("../lib/shortform_utils");
 
 const MAX_DURATION = 30; // safety ceiling regardless of variant
-
-const CLOUD = process.env.CLOUDINARY_CLOUD || "dvjshgv9h";
-const PRESET = process.env.CLOUDINARY_PRESET_VIDEO || "nounda_audio_unsigned";
-
-function selfBase() {
-  if (process.env.SELF_BASE_URL) return process.env.SELF_BASE_URL.replace(/\/$/, "");
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "";
-}
-
-function run(cmd, args) {
-  return new Promise((resolve, reject) => {
-    execFile(cmd, args, { maxBuffer: 1024 * 1024 * 64 }, (err, stdout, stderr) => {
-      if (err) {
-        err.stderr = stderr;
-        return reject(err);
-      }
-      resolve({ stdout, stderr });
-    });
-  });
-}
-
-async function probeDuration(url) {
-  const { stdout } = await run(ffprobePath, [
-    "-v", "error", "-show_entries", "format=duration",
-    "-of", "default=noprint_wrappers=1:nokey=1", url,
-  ]);
-  const d = parseFloat(stdout);
-  return Number.isFinite(d) && d > 0 ? d : null;
-}
-
-async function fetchCaptionPng(hookText, supportingLine) {
-  const base = selfBase();
-  if (!base) throw new Error("SELF_BASE_URL / VERCEL_URL not set — cannot reach /api/caption");
-  const res = await fetch(`${base}/api/caption`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ hook_text: hookText, supporting_line: supportingLine }),
-  });
-  if (!res.ok) throw new Error(`caption render failed: ${res.status} ${await res.text()}`);
-  return Buffer.from(await res.arrayBuffer());
-}
-
-async function uploadToCloudinary(filePath) {
-  const fileBuffer = await fs.readFile(filePath);
-  const form = new FormData();
-  form.append("file", new Blob([fileBuffer], { type: "video/mp4" }), "shortform.mp4");
-  form.append("upload_preset", PRESET);
-  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD}/video/upload`, {
-    method: "POST",
-    body: form,
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(`Cloudinary upload failed: ${JSON.stringify(json)}`);
-  return json.secure_url;
-}
 
 module.exports = async (req, res) => {
   if (req.method !== "POST") {

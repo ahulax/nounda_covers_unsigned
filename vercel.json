@@ -5,12 +5,11 @@
       "maxDuration": 60,
       "includeFiles": "assets/**"
     },
-    "api/caption.py": {
-      "memory": 512,
-      "maxDuration": 30,
-      "includeFiles": "assets/**"
-    },
     "api/shortform.js": {
+      "memory": 2048,
+      "maxDuration": 60
+    },
+    "api/mechanism.js": {
       "memory": 2048,
       "maxDuration": 60
     }
