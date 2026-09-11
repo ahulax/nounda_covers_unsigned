@@ -85,11 +85,15 @@ module.exports = async (req, res) => {
   const listPath = path.join(workDir, "list.txt");
 
   try {
-    const segmentPaths = [];
-    for (let i = 0; i < beats.length; i++) {
-      const seg = await renderSegment(workDir, i, beats[i].video_url, beats[i].text, beatDuration);
-      segmentPaths.push(seg);
-    }
+    // Rendered concurrently, not sequentially: a live timing test hit 60.03s end to end,
+    // right at Vercel Hobby's hard 60s cap (confirmed by the same call dropping outright
+    // on a shorter client timeout). Each segment is a network fetch of a remote clip plus
+    // a fast local encode -- running all four at once overlaps that fetch latency instead
+    // of paying it four times. Promise.all preserves input order regardless of completion
+    // order, so the concat list below still comes out in beat order.
+    const segmentPaths = await Promise.all(
+      beats.map((b, i) => renderSegment(workDir, i, b.video_url, b.text, beatDuration))
+    );
 
     const listContent = segmentPaths.map((p) => `file '${p}'`).join("\n");
     await fs.writeFile(listPath, listContent);
