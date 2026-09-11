@@ -11,7 +11,7 @@
     },
     "api/mechanism.js": {
       "memory": 2048,
-      "maxDuration": 60
+      "maxDuration": 180
     }
   }
 }
