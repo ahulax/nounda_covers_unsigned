@@ -67,15 +67,14 @@ module.exports = async (req, res) => {
 
   const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
   const { beats, beat_duration: rawBeatDuration } = body;
-  console.log("mechanism request body:", JSON.stringify(body));
 
   if (!Array.isArray(beats) || beats.length !== 4) {
-    res.status(400).json({ error: "beats must be an array of exactly 4 {video_url, text} items", received: body });
+    res.status(400).json({ error: "beats must be an array of exactly 4 {video_url, text} items" });
     return;
   }
   for (const [i, b] of beats.entries()) {
     if (!b || !b.video_url || !b.text) {
-      res.status(400).json({ error: `beats[${i}] is missing video_url or text`, received: body });
+      res.status(400).json({ error: `beats[${i}] is missing video_url or text` });
       return;
     }
   }
