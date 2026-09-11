@@ -12,6 +12,10 @@
     "api/mechanism.js": {
       "memory": 2048,
       "maxDuration": 180
+    },
+    "api/cutdown.js": {
+      "memory": 2048,
+      "maxDuration": 180
     }
   }
 }

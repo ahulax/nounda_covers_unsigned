@@ -124,3 +124,43 @@ def render_caption(hook_text: str, supporting_line: str = "") -> Image.Image:
             y += slh
 
     return img
+
+
+def render_chunk_caption(text: str) -> Image.Image:
+    """A short (3-5 word) spoken-caption chunk, for Format A's word-timed overlay
+    sequence -- same editorial-serif visual language as render_caption() (Playfair,
+    gold rule, bottom-rising scrim) but sized for a transient phrase rather than a
+    standalone headline, since a run of these plays back-to-back across real speech.
+    """
+    text = (text or "").strip()
+
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+
+    f, lines = _fit_wrapped(d, text, PF700, MAXW, start_size=64, min_size=40, max_lines=2)
+    lh = int(f.size * 1.15)
+    block_h = lh * len(lines)
+
+    safe_h = SAFE_BOTTOM - SAFE_TOP
+    y0 = SAFE_TOP + max(0, (safe_h - block_h) // 2) - 40
+    y0 = max(SAFE_TOP - 40, min(y0, SAFE_BOTTOM - block_h))
+
+    grad_h = min(H - y0 + 60, H)
+    grad = Image.new("L", (1, grad_h), 0)
+    for i in range(grad_h):
+        grad.putpixel((0, i), int(200 * (i / grad_h) ** 1.4))
+    grad = grad.resize((W, grad_h))
+    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    shadow.paste(Image.new("RGBA", (W, grad_h), (10, 8, 6, 255)), (0, H - grad_h), grad)
+    img = Image.alpha_composite(img, shadow)
+    d = ImageDraw.Draw(img)
+
+    x = MARGIN + 28
+    d.rectangle([MARGIN, y0, MARGIN + 6, y0 + block_h], fill=GOLD)
+
+    y = y0
+    for ln in lines:
+        d.text((x, y), ln, font=f, fill=CREAM)
+        y += lh
+
+    return img
