@@ -1,14 +1,18 @@
-"""POST /api/caption — render a transparent 1080x1920 PNG caption overlay for short-form video.
+"""render_caption() — build a transparent 1080x1920 PNG caption overlay for short-form video.
 
-Used by api/shortform.js (SF03 render endpoint): this endpoint does the text layout
-(wrapping, fitting, brand styling) in Python/PIL, reusing the exact helpers already
-proven in api/_render.py, then the Node function overlays the PNG onto video with
-ffmpeg. Splitting it this way avoids native canvas bindings in the Node runtime
-(node-canvas is notoriously fragile on Vercel) while keeping ffmpeg -- which Python's
-serverless story handles far less reliably -- in Node.
+Imported by api/index.py and dispatched on POST /api/caption (see the note in index.py
+above the "/api/video-url" section: Vercel bundles this whole project into ONE Python
+Lambda, so a second file here is never actually invoked as its own function — index.py
+has to import and call this directly, dispatching on self.path, exactly like it already
+does for _broll.select_broll()). This file holds ONLY the rendering logic, no HTTP
+handling, for that reason.
 
-Request body: { "hook_text": "...", "supporting_line": "..." (optional) }
-Response: image/png bytes, 1080x1920, transparent background.
+Used by api/shortform.js (SF03 render endpoint): this does the text layout (wrapping,
+fitting, brand styling) in Python/PIL, reusing the exact helpers already proven in
+api/_render.py, then the Node function overlays the PNG onto video with ffmpeg.
+Splitting it this way avoids native canvas bindings in the Node runtime (node-canvas is
+notoriously fragile on Vercel) while keeping ffmpeg -- which Python's serverless story
+handles far less reliably -- in Node.
 
 Layout, per SHORT-FORM-CONTENT-PRODUCT-SHEET.md's technical spec:
   - text centred in the safe vertical zone (roughly 40-60% of height)
@@ -19,11 +23,8 @@ Layout, per SHORT-FORM-CONTENT-PRODUCT-SHEET.md's technical spec:
   - small gold accent rule above the hook, matching the section-label convention
     used everywhere else in the brand system
 """
-import io
-import json
 import os
 import sys
-from http.server import BaseHTTPRequestHandler
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -116,26 +117,3 @@ def render_caption(hook_text: str, supporting_line: str = "") -> Image.Image:
             y += slh
 
     return img
-
-
-class handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length) or b"{}")
-            img = render_caption(body.get("hook_text", ""), body.get("supporting_line", ""))
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            data = buf.getvalue()
-            self.send_response(200)
-            self.send_header("Content-Type", "image/png")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-        except Exception as e:
-            payload = json.dumps({"error": str(e)}).encode()
-            self.send_response(500)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)

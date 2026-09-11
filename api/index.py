@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _render import render_cover  # noqa: E402
 from _broll import select_broll  # noqa: E402
+from caption import render_caption  # noqa: E402
 
 PIAPI_KEY = os.environ.get("PIAPI_KEY", "")
 CLOUD = os.environ.get("CLOUDINARY_CLOUD", "")
@@ -305,10 +306,14 @@ def handle(payload):
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/api/caption":
+            self._caption()
+            return
         try:
             length = int(self.headers.get("content-length") or 0)
             payload = json.loads(self.rfile.read(length) or b"{}")
-            if urllib.parse.urlparse(self.path).path == "/api/broll":
+            if path == "/api/broll":
                 result = select_broll(
                     payload.get("queries") or [],
                     per_segment=int(payload.get("per_segment") or 8),
@@ -368,3 +373,20 @@ class handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _caption(self):
+        try:
+            length = int(self.headers.get("content-length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            img = render_caption(body.get("hook_text", ""), body.get("supporting_line", ""))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            data = buf.getvalue()
+        except Exception as exc:
+            self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
