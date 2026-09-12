@@ -29,7 +29,9 @@ const fs = require("fs/promises");
 const path = require("path");
 const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
-const { run, probeDuration, fetchCaptionPng, uploadToCloudinary } = require("../lib/shortform_utils");
+const {
+  run, probeDuration, fetchCaptionPng, uploadToCloudinary, generateMusicBed, fetchMusicTrendStyle,
+} = require("../lib/shortform_utils");
 
 const MAX_DURATION = 30; // safety ceiling regardless of variant
 
@@ -90,14 +92,31 @@ module.exports = async (req, res) => {
       args.push("-an");
     }
 
+    // Silent renders into its own file first (no audio); a generated music bed is muxed
+    // in afterward, so a probe/generation failure can't take down the Voiced path too.
+    const renderPath = variant === "Silent" ? path.join(workDir, "silent.mp4") : outputPath;
+
     args.push(
       "-t", String(targetDuration),
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
       "-movflags", "+faststart",
-      outputPath
+      renderPath
     );
 
     await run(ffmpegPath, args);
+
+    if (variant === "Silent") {
+      const moodNote = await fetchMusicTrendStyle();
+      const musicPath = await generateMusicBed(targetDuration, workDir, moodNote);
+      await run(ffmpegPath, [
+        "-y", "-i", renderPath, "-i", musicPath,
+        "-map", "0:v", "-map", "1:a",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
+        "-shortest", "-movflags", "+faststart",
+        outputPath,
+      ]);
+    }
+
     const outputUrl = await uploadToCloudinary(outputPath);
     res.status(200).json({ output_url: outputUrl });
   } catch (err) {

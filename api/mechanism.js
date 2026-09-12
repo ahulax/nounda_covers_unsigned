@@ -2,9 +2,11 @@
  * POST /api/mechanism — render one Format B (Mechanism Explainer) short-form video.
  *
  * Four beats (assumption / reality / stakes / action), each its own b-roll clip with
- * its own caption, cut together into one video. Silent — no voiceover, no music yet
- * (per the 2026-09-11 decision: spoken narration is Format-A only; sound design for
- * B/C is a separate, still-unsolved problem, not blocked on by this endpoint).
+ * its own caption, cut together into one video. No spoken narration (per the 2026-09-11
+ * decision: spoken narration is Format-A only) -- but DOES carry a generated instrumental
+ * music bed as of 2026-09-12, after Daniil confirmed silent-with-no-music read as dead air.
+ * Music style is locked to organic/acoustic only (see BASE_MUSIC_STYLE in shortform_utils.js)
+ * after he rejected synth/corporate-sounding sketches.
  *
  * Request body:
  *   {
@@ -24,7 +26,9 @@ const fs = require("fs/promises");
 const path = require("path");
 const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
-const { run, fetchCaptionPng, uploadToCloudinary } = require("../lib/shortform_utils");
+const {
+  run, fetchCaptionPng, uploadToCloudinary, generateMusicBed, fetchMusicTrendStyle,
+} = require("../lib/shortform_utils");
 
 const DEFAULT_BEAT_DURATION = 6;
 const MAX_BEAT_DURATION = 10;
@@ -98,9 +102,22 @@ module.exports = async (req, res) => {
     const listContent = segmentPaths.map((p) => `file '${p}'`).join("\n");
     await fs.writeFile(listPath, listContent);
 
+    const silentPath = path.join(workDir, "silent.mp4");
     await run(ffmpegPath, [
       "-y", "-f", "concat", "-safe", "0", "-i", listPath,
       "-c", "copy", "-movflags", "+faststart",
+      silentPath,
+    ]);
+
+    const totalDuration = beatDuration * beats.length;
+    const moodNote = await fetchMusicTrendStyle();
+    const musicPath = await generateMusicBed(totalDuration, workDir, moodNote);
+
+    await run(ffmpegPath, [
+      "-y", "-i", silentPath, "-i", musicPath,
+      "-map", "0:v", "-map", "1:a",
+      "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
+      "-shortest", "-movflags", "+faststart",
       outputPath,
     ]);
 
