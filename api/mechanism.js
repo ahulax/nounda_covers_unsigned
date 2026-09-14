@@ -5,8 +5,9 @@
  * its own caption, cut together into one video. No spoken narration (per the 2026-09-11
  * decision: spoken narration is Format-A only) -- but DOES carry a generated instrumental
  * music bed as of 2026-09-12, after Daniil confirmed silent-with-no-music read as dead air.
- * Music style is locked to organic/acoustic only (see BASE_MUSIC_STYLE in shortform_utils.js)
- * after he rejected synth/corporate-sounding sketches.
+ * Music stays organic/acoustic only (never synth/corporate) but rotates across several
+ * acoustic instrument families per render (see MUSIC_STYLE_VARIANTS in shortform_utils.js)
+ * so consecutive reels don't all sound like solo piano.
  *
  * Request body:
  *   {
