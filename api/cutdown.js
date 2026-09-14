@@ -67,10 +67,26 @@ async function renderClip(workDir, index, clip, fields) {
   const duration = Math.min(end - start, MAX_CLIP_SECONDS);
   if (!(duration > 0)) throw new Error(`clips[${index}]: end must be greater than start`);
 
+  // A caption-less Cutdown is a silent hard-requirement violation (spec: captions are
+  // always burned in, never left to platform auto-captions), so this must fail loudly
+  // rather than quietly render a substandard video. Root cause seen in production: a
+  // Video Production record whose Analysis JSON field was simply empty (Gemini analysis
+  // never ran on that segment) -- SF04's segment-picker only checked for a video URL, not
+  // for analysis data, so it can pick a segment with video but no transcript.
   const analysis = parseSegmentAnalysis(fields[fieldNames.analysis]);
-  const transcript = analysis && Array.isArray(analysis.transcript) ? analysis.transcript : [];
+  if (!analysis) {
+    throw new Error(
+      `clips[${index}]: ${fieldNames.analysis} is missing or unparseable for segment "${segment}" -- cannot burn in captions. Refusing to render a subtitle-less clip.`
+    );
+  }
+  const transcript = Array.isArray(analysis.transcript) ? analysis.transcript : [];
   const shiftedWords = wordsInWindow(transcript, start, end);
   const chunks = chunkWords(shiftedWords);
+  if (chunks.length === 0) {
+    throw new Error(
+      `clips[${index}]: no transcript words fall inside [${start}, ${end}] for segment "${segment}" -- cannot burn in captions. Refusing to render a subtitle-less clip.`
+    );
+  }
 
   const chunkPngPaths = [];
   for (let i = 0; i < chunks.length; i++) {
