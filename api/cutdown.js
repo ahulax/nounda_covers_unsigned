@@ -41,7 +41,7 @@ const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
 const {
   run, uploadToCloudinary, fetchChunkCaptionPng, fetchAirtableRecord,
-  parseSegmentAnalysis, wordsInWindow, chunkWords,
+  parseSegmentAnalysis, wordsInWindow, chunkWords, snapToSentence,
 } = require("../lib/shortform_utils");
 
 const MAX_CLIPS = 3;
@@ -58,14 +58,11 @@ const SEGMENT_FIELDS = {
 };
 
 async function renderClip(workDir, index, clip, fields) {
-  const { segment, start, end } = clip;
+  const { segment } = clip;
   const fieldNames = SEGMENT_FIELDS[segment];
   if (!fieldNames) throw new Error(`clips[${index}]: unknown segment "${segment}"`);
   const videoUrl = fields[fieldNames.url];
   if (!videoUrl) throw new Error(`clips[${index}]: record has no ${fieldNames.url}`);
-
-  const duration = Math.min(end - start, MAX_CLIP_SECONDS);
-  if (!(duration > 0)) throw new Error(`clips[${index}]: end must be greater than start`);
 
   // A caption-less Cutdown is a silent hard-requirement violation (spec: captions are
   // always burned in, never left to platform auto-captions), so this must fail loudly
@@ -80,6 +77,16 @@ async function renderClip(workDir, index, clip, fields) {
     );
   }
   const transcript = Array.isArray(analysis.transcript) ? analysis.transcript : [];
+
+  // The model picks times off the analysis JSON and regularly lands mid-sentence, which
+  // reads as an abrupt jump at a clip join and as a sentence the avatar never finishes at
+  // the end. Both edges get pulled onto real sentence boundaries here, and the caption
+  // window is derived from the same snapped bounds so speech and subtitles always agree.
+  const { start, end } = snapToSentence(transcript, clip.start, clip.end, MAX_CLIP_SECONDS);
+
+  const duration = Math.min(end - start, MAX_CLIP_SECONDS);
+  if (!(duration > 0)) throw new Error(`clips[${index}]: end must be greater than start`);
+
   const shiftedWords = wordsInWindow(transcript, start, end);
   const chunks = chunkWords(shiftedWords);
   if (chunks.length === 0) {
