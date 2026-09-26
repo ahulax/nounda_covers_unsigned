@@ -41,7 +41,7 @@ const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
 const {
   run, uploadToCloudinary, fetchChunkCaptionPng, fetchAirtableRecord,
-  parseSegmentAnalysis, wordsInWindow, chunkWords, snapToSentence,
+  parseSegmentAnalysis, wordsInWindow, chunkWords, snapToSentence, probeDuration,
 } = require("../lib/shortform_utils");
 
 const MAX_CLIPS = 3;
@@ -139,6 +139,60 @@ async function renderClip(workDir, index, clip, fields) {
   return segmentPath;
 }
 
+// Each clip is a separate avatar take, so a hard splice drops the viewer into the middle
+// of a gesture with speech already running: the incoming segment's first word frequently
+// starts at 0.00s, leaving no settle-in at all. A short dissolve on picture and audio
+// reads as a deliberate transition instead of a jump. Kept brief so it never feels like a
+// slideshow wipe.
+const JOIN_FADE_SECONDS = 0.25;
+
+async function joinSegments(segmentPaths, listPath, outputPath) {
+  if (segmentPaths.length === 1) {
+    await fs.writeFile(listPath, `file '${segmentPaths[0]}'`);
+    await run(ffmpegPath, [
+      "-y", "-f", "concat", "-safe", "0", "-i", listPath,
+      "-c", "copy", "-movflags", "+faststart", outputPath,
+    ]);
+    return;
+  }
+
+  const durations = [];
+  for (const p of segmentPaths) {
+    const d = await probeDuration(p);
+    if (!d) throw new Error(`could not probe duration of ${p} -- cannot place the join fades`);
+    durations.push(d);
+  }
+
+  const args = ["-y"];
+  for (const p of segmentPaths) args.push("-i", p);
+
+  let filter = "";
+  let vLabel = "0:v";
+  let aLabel = "0:a";
+  // Both streams shorten by the fade length at every join, so picture and audio stay in
+  // step as the running offset accumulates.
+  let offset = durations[0];
+  for (let i = 1; i < segmentPaths.length; i++) {
+    const v = `v${i}`;
+    const a = `a${i}`;
+    const at = (offset - JOIN_FADE_SECONDS).toFixed(3);
+    filter += `[${vLabel}][${i}:v]xfade=transition=fade:duration=${JOIN_FADE_SECONDS}:offset=${at}[${v}];`;
+    filter += `[${aLabel}][${i}:a]acrossfade=d=${JOIN_FADE_SECONDS}:c1=tri:c2=tri[${a}];`;
+    vLabel = v;
+    aLabel = a;
+    offset = offset + durations[i] - JOIN_FADE_SECONDS;
+  }
+
+  args.push(
+    "-filter_complex", filter.replace(/;$/, ""),
+    "-map", `[${vLabel}]`, "-map", `[${aLabel}]`,
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+    outputPath
+  );
+  await run(ffmpegPath, args);
+}
+
 module.exports = async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).json({ error: "POST only" });
@@ -171,14 +225,7 @@ module.exports = async (req, res) => {
     const fields = await fetchAirtableRecord(VIDEO_BASE_ID, VIDEO_TABLE_ID, recordId);
     const segmentPaths = await Promise.all(clips.map((c, i) => renderClip(workDir, i, c, fields)));
 
-    const listContent = segmentPaths.map((p) => `file '${p}'`).join("\n");
-    await fs.writeFile(listPath, listContent);
-
-    await run(ffmpegPath, [
-      "-y", "-f", "concat", "-safe", "0", "-i", listPath,
-      "-c", "copy", "-movflags", "+faststart",
-      outputPath,
-    ]);
+    await joinSegments(segmentPaths, listPath, outputPath);
 
     const outputUrl = await uploadToCloudinary(outputPath);
     res.status(200).json({ output_url: outputUrl });
