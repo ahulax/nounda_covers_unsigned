@@ -116,10 +116,19 @@ async function renderClip(workDir, index, clip, fields) {
     "[0:v]scale=1080:1920:force_original_aspect_ratio=increase," +
     "crop=1080:1920,setsar=1,fps=30[bg]";
   let prevLabel = "bg";
+  const lastChunk = chunks.length - 1;
   chunks.forEach((chunk, i) => {
     const inputIdx = i + 1; // input 0 is the video; overlays start at 1
-    const outLabel = i === chunks.length - 1 ? "vout" : `v${i}`;
-    filter += `;[${prevLabel}][${inputIdx}:v]overlay=0:0:enable='between(t,${chunk.start},${chunk.end})'[${outLabel}]`;
+    const outLabel = i === lastChunk ? "vout" : `v${i}`;
+    // Each chunk PNG carries the dark scrim as well as its text, so showing a chunk only
+    // while its own words are spoken made the scrim blink out in every pause between
+    // phrases. Chunks are held until the next one takes over (and the first/last stretch
+    // to the clip edges), which keeps the scrim continuously on screen while the text
+    // swaps underneath it -- also how ordinary subtitles behave. The epsilon stops two
+    // overlays being enabled on the same frame, which would double-darken the scrim.
+    const from = i === 0 ? 0 : chunk.start;
+    const to = i === lastChunk ? duration : chunks[i + 1].start - 0.001;
+    filter += `;[${prevLabel}][${inputIdx}:v]overlay=0:0:enable='between(t,${from},${to})'[${outLabel}]`;
     prevLabel = outLabel;
   });
   if (chunks.length === 0) filter = filter.replace("[bg]", "[vout]");

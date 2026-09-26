@@ -51,6 +51,7 @@ MARGIN = 84          # matches the platform right-side button-column keepout
 MAXW = W - 2 * MARGIN - 40  # minus the left rule + its gap to the text
 SAFE_TOP = int(H * 0.40)
 SAFE_BOTTOM = H - 350  # platform caption/audio UI chrome
+CHUNK_SCRIM_H = 940    # constant across Format A chunks so the scrim never jumps or flashes
 
 
 def _fit_wrapped(draw, text, font_path, max_w, start_size, min_size, max_lines):
@@ -145,7 +146,10 @@ def render_chunk_caption(text: str) -> Image.Image:
     y0 = SAFE_TOP + max(0, (safe_h - block_h) // 2) - 40
     y0 = max(SAFE_TOP - 40, min(y0, SAFE_BOTTOM - block_h))
 
-    grad_h = min(H - y0 + 60, H)
+    # Fixed height, deliberately not derived from y0: these chunks play back-to-back and a
+    # scrim that grew or shrank with the line count visibly jumped between phrases. Sized
+    # to clear the highest y0 any wrap produces, so the text always sits inside it.
+    grad_h = CHUNK_SCRIM_H
     grad = Image.new("L", (1, grad_h), 0)
     for i in range(grad_h):
         grad.putpixel((0, i), int(200 * (i / grad_h) ** 1.4))
