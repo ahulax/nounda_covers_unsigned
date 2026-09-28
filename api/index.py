@@ -53,7 +53,9 @@ REFERENCE_URL = os.environ.get("AVATAR_REFERENCE_URL", "") or (
 
 PIAPI_TASK = "https://api.piapi.ai/api/v1/task"
 POLL_SECONDS = 3
-POLL_MAX = 15  # ~45s ceiling, inside Vercel's 60s function limit
+POLL_DEADLINE = 52  # seconds of wall clock for the PiAPI task; the function has 60s and the
+                    # composite + upload take ~2s. NanoBanana 2K runs 40-48s, so the old
+                    # 15 x 3s window (45s) timed out on most real requests.
 
 # The guide's guardrails, applied to every generation. Two hard-won lessons baked in:
 # (1) naming a setting (e.g. "library") makes the model reach for an associative prop
@@ -145,7 +147,8 @@ def generate_portrait(concept):
     if not task_id:
         raise RuntimeError(f"no task_id in PiAPI response: {created}")
 
-    for _ in range(POLL_MAX):
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < POLL_DEADLINE:
         time.sleep(POLL_SECONDS)
         req = urllib.request.Request(f"{PIAPI_TASK}/{task_id}", headers=headers)
         with _urlopen(req, timeout=30) as r:
@@ -159,7 +162,7 @@ def generate_portrait(concept):
             return urls[0]
         if status in ("failed", "error"):
             raise RuntimeError(f"PiAPI task failed: {data.get('error') or data}")
-    raise TimeoutError("PiAPI task did not finish within the polling window")
+    raise TimeoutError(f"PiAPI task {task_id} did not finish within {POLL_DEADLINE}s; re-run S31 (it is idempotent)")
 
 
 def fetch_image(url):
