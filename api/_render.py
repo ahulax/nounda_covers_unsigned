@@ -6,7 +6,8 @@ encodes are the ones in YOUTUBE-PACKAGING-GUIDE.md §1.3:
   - strong warm-dark scrim on the LEFT ONLY, fading out before it reaches the face
   - inset cream editorial frame
   - gold accent bar + uppercase kicker, top-left
-  - huge cream numeral + key word on a GOLD bar (clean gap) + cream supporting line
+  - number cover: figure + gold unit on one baseline, then a headline that says what it means
+  - headline cover: a big Playfair question/statement, up to three lines, gold rule
   - white logo bottom-left with a GUARANTEED clear band above it
 """
 import os
@@ -95,56 +96,62 @@ def render_cover(portrait: Image.Image, concept: dict) -> Image.Image:
     # kicker: gold accent bar + tracked uppercase label
     d.rectangle([PAD, PAD + int(15 * S), PAD + int(48 * S), PAD + int(18 * S)], fill=GOLD)
     _tracked(d, (PAD + int(68 * S), PAD + int(2 * S)), kicker.upper(),
-             ImageFont.truetype(IN600, int(29 * S)), CREAM, 5 * S)
+             ImageFont.truetype(IN600, int(34 * S)), CREAM, 5 * S)
 
-    top = PAD + int(70 * S)
-    bot = H - PAD - int(96 * S)
+    top = PAD + int(95 * S)
+    bot = H - PAD - int(150 * S)
     logo_px = int(80 * S)
     logo_y = H - PAD - int(44 * S)
+    centre = lambda block: top + max(0, (bot - top - block) // 2)
 
     if number:
-        nf = _fit(PF700, number, int(280 * S), MAXW)
+        # NUMBER COVER (layout "B", Daniil 2026-09-28): figure and unit share a baseline,
+        # the unit in gold, then a two-line headline that says what the number means.
+        # Only for videos where the number IS the finding; otherwise use the headline cover.
+        nf = ImageFont.truetype(PF700, int(200 * S))
+        uf = ImageFont.truetype(PF700, int(88 * S))
+        unit = word.upper()
+        # A wide figure ("12.8%", "30 000") pushes the unit onto its own line below,
+        # still gold and full size, rather than shrinking it into a footnote.
+        stacked = d.textlength(number, font=nf) + int(24 * S) + d.textlength(unit, font=uf) > MAXW
+        if stacked:
+            while d.textlength(number, font=nf) > MAXW and nf.size > int(120 * S):
+                nf = ImageFont.truetype(PF700, nf.size - 6)
         nb = nf.getbbox(number)
         ink_h = nb[3] - nb[1]
-        wf = ImageFont.truetype(PF700, int(76 * S))
-        bar_h = int(76 * S) + int(20 * S)
-        sf = ImageFont.truetype(PF700, int(50 * S)) if supporting else None
-        sup_lines = _wrap(supporting, sf, MAXW, d) if supporting else []
-        sup_h = int(50 * S * 1.15) * len(sup_lines)
-        g1, g2 = int(34 * S), int(40 * S)
-        block = ink_h + g1 + bar_h + ((g2 + sup_h) if supporting else 0)
-        y = top + max(0, (bot - top - block) // 2)
-        # clamp: always keep a clear band above the logo
-        y = max(top, min(y, (logo_y + int(22 * S)) - int(56 * S) - (block + int(46 * S))))
-
+        ub = uf.getbbox(unit)
+        unit_h = (ub[3] - ub[1]) + int(18 * S) if stacked else 0
+        hf = ImageFont.truetype(PF700, int(74 * S))
+        lines = _wrap(supporting, hf, MAXW, d)[:3] if supporting else []
+        lh = int(hf.size * 1.1)
+        block = ink_h + unit_h + (int(30 * S) + lh * len(lines) if lines else 0)
+        y = centre(block)
         d.text((PAD - nb[0], y - nb[1]), number, font=nf, fill=CREAM)
-        y += ink_h + g1
-        ww = d.textlength(word.upper(), font=wf)
-        d.rounded_rectangle([PAD, y, PAD + ww + int(44 * S), y + bar_h], radius=3, fill=GOLD)
-        d.text((PAD + int(22 * S), y + int(6 * S)), word.upper(), font=wf, fill=DARKW)
-        y += bar_h
-        if supporting:
-            y += g2
-            for ln in sup_lines:
-                d.text((PAD, y), ln, font=sf, fill=CREAM)
-                y += int(50 * S * 1.15)
-    else:
-        hf = _fit(PF700, headline, int(130 * S), MAXW)
-        hl = _wrap(headline, hf, MAXW, d)
-        lh = int(hf.size * 1.02)
-        sf = ImageFont.truetype(PF700, int(50 * S))
-        sup_lines = _wrap(supporting, sf, MAXW, d) if supporting else []
-        block = lh * len(hl) + int(40 * S) + int(50 * S * 1.15) * len(sup_lines) + int(26 * S)
-        y = top + max(0, (bot - top - block) // 2)
-        y = max(top, min(y, (logo_y + int(22 * S)) - int(56 * S) - (block + int(46 * S))))
-        for ln in hl:
+        if stacked:
+            d.text((PAD - ub[0], y + ink_h + int(18 * S) - ub[1]), unit, font=uf, fill=GOLD)
+        else:
+            d.text((PAD + d.textlength(number, font=nf) + int(24 * S),
+                    y + ink_h - (ub[3] - ub[1]) - ub[1]), unit, font=uf, fill=GOLD)
+        y += ink_h + unit_h + int(30 * S)
+        for ln in lines:
             d.text((PAD, y), ln, font=hf, fill=CREAM)
             y += lh
-        y += int(40 * S)
-        for ln in sup_lines:
-            d.text((PAD, y), ln, font=sf, fill=CREAM)
-            y += int(50 * S * 1.15)
-        d.rectangle([PAD, y + int(8 * S), PAD + int(100 * S), y + int(15 * S)], fill=GOLD)
+    else:
+        # HEADLINE COVER (layout "C"): a big Playfair question or statement, up to four
+        # lines, a short gold rule under it. No numeral, no supporting line: the title
+        # completes the thought.
+        longest = max(headline.split(), key=len) if headline else ""
+        hf = _fit(PF700, longest, int(112 * S), MAXW)  # only the longest WORD must fit the column
+        lines = _wrap(headline, hf, MAXW, d)
+        while len(lines) > 4 and hf.size > int(96 * S):
+            hf = ImageFont.truetype(PF700, hf.size - 4)
+            lines = _wrap(headline, hf, MAXW, d)
+        lh = int(hf.size * 1.04)
+        y = centre(lh * len(lines))
+        for ln in lines:
+            d.text((PAD, y), ln, font=hf, fill=CREAM)
+            y += lh
+        d.rectangle([PAD, y + int(30 * S), PAD + int(100 * S), y + int(36 * S)], fill=GOLD)  # clear of descenders
 
     lg = Image.open(LOGO).convert("RGBA").resize((logo_px, logo_px), Image.LANCZOS)
     img.alpha_composite(lg, (PAD - int(4 * S), logo_y))
