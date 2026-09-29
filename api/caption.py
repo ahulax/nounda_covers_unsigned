@@ -127,7 +127,25 @@ def render_caption(hook_text: str, supporting_line: str = "") -> Image.Image:
     return img
 
 
-def render_chunk_caption(text: str) -> Image.Image:
+def render_chunk_scrim() -> Image.Image:
+    """The bottom-rising scrim on its own, with no text.
+
+    Format A plays a run of chunk captions back to back. Baking the scrim into every
+    chunk meant it could only be on screen while that chunk's words were, so it blinked
+    out in the pauses between phrases. Holding a chunk longer to cover the gap desynced
+    the words from the mouth instead. The scrim is therefore its own layer, shown for the
+    whole clip, and the text chunks sit on top of it only while they are actually spoken.
+    """
+    grad = Image.new("L", (1, CHUNK_SCRIM_H), 0)
+    for i in range(CHUNK_SCRIM_H):
+        grad.putpixel((0, i), int(200 * (i / CHUNK_SCRIM_H) ** 1.4))
+    grad = grad.resize((W, CHUNK_SCRIM_H))
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    img.paste(Image.new("RGBA", (W, CHUNK_SCRIM_H), (10, 8, 6, 255)), (0, H - CHUNK_SCRIM_H), grad)
+    return img
+
+
+def render_chunk_caption(text: str, with_scrim: bool = True) -> Image.Image:
     """A short (3-5 word) spoken-caption chunk, for Format A's word-timed overlay
     sequence -- same editorial-serif visual language as render_caption() (Playfair,
     gold rule, bottom-rising scrim) but sized for a transient phrase rather than a
@@ -146,18 +164,11 @@ def render_chunk_caption(text: str) -> Image.Image:
     y0 = SAFE_TOP + max(0, (safe_h - block_h) // 2) - 40
     y0 = max(SAFE_TOP - 40, min(y0, SAFE_BOTTOM - block_h))
 
-    # Fixed height, deliberately not derived from y0: these chunks play back-to-back and a
-    # scrim that grew or shrank with the line count visibly jumped between phrases. Sized
-    # to clear the highest y0 any wrap produces, so the text always sits inside it.
-    grad_h = CHUNK_SCRIM_H
-    grad = Image.new("L", (1, grad_h), 0)
-    for i in range(grad_h):
-        grad.putpixel((0, i), int(200 * (i / grad_h) ** 1.4))
-    grad = grad.resize((W, grad_h))
-    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    shadow.paste(Image.new("RGBA", (W, grad_h), (10, 8, 6, 255)), (0, H - grad_h), grad)
-    img = Image.alpha_composite(img, shadow)
-    d = ImageDraw.Draw(img)
+    # Callers that composite the scrim as its own persistent layer ask for text only, so
+    # the words can appear and clear exactly with the speech without the scrim blinking.
+    if with_scrim:
+        img = Image.alpha_composite(img, render_chunk_scrim())
+        d = ImageDraw.Draw(img)
 
     x = MARGIN + 28
     d.rectangle([MARGIN, y0, MARGIN + 6, y0 + block_h], fill=GOLD)

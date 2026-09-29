@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _render import render_cover  # noqa: E402
 from _broll import select_broll  # noqa: E402
-from caption import render_caption, render_chunk_caption  # noqa: E402
+from caption import render_caption, render_chunk_caption, render_chunk_scrim  # noqa: E402
 
 PIAPI_KEY = os.environ.get("PIAPI_KEY", "")
 CLOUD = os.environ.get("CLOUDINARY_CLOUD", "")
@@ -401,7 +401,10 @@ class handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("content-length") or 0)
             body = json.loads(self.rfile.read(length) or b"{}")
-            img = render_chunk_caption(body.get("text", ""))
+            if body.get("scrim_only"):
+                img = render_chunk_scrim()
+            else:
+                img = render_chunk_caption(body.get("text", ""), with_scrim=not body.get("text_only"))
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             data = buf.getvalue()

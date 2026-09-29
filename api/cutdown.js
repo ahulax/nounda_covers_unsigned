@@ -40,7 +40,7 @@ const path = require("path");
 const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
 const {
-  run, uploadToCloudinary, fetchChunkCaptionPng, fetchAirtableRecord,
+  run, uploadToCloudinary, fetchChunkCaptionPng, fetchChunkScrimPng, fetchAirtableRecord,
   parseSegmentAnalysis, wordsInWindow, chunkWords, snapToSentence, probeDuration,
 } = require("../lib/shortform_utils");
 
@@ -95,9 +95,15 @@ async function renderClip(workDir, index, clip, fields) {
     );
   }
 
+  // The scrim is its own layer held for the whole clip; the words are transparent
+  // overlays on top of it. Baking the scrim into each chunk forced a choice between the
+  // scrim blinking out in every pause and the text lingering out of sync with the mouth.
+  const scrimPath = path.join(workDir, `clip${index}-scrim.png`);
+  await fs.writeFile(scrimPath, await fetchChunkScrimPng());
+
   const chunkPngPaths = [];
   for (let i = 0; i < chunks.length; i++) {
-    const png = await fetchChunkCaptionPng(chunks[i].text);
+    const png = await fetchChunkCaptionPng(chunks[i].text, { text_only: true });
     const p = path.join(workDir, `clip${index}-chunk${i}.png`);
     await fs.writeFile(p, png);
     chunkPngPaths.push(p);
@@ -109,29 +115,25 @@ async function renderClip(workDir, index, clip, fields) {
   // ignored -- the clip read to the end of the source file instead of trimming, verified
   // by a local test where a 25.86s intended trim came out as 59.78s (the untrimmed
   // remainder from the seek point) until this was fixed.
-  const args = ["-y", "-ss", String(start), "-t", String(duration), "-i", videoUrl];
+  const args = ["-y", "-ss", String(start), "-t", String(duration), "-i", videoUrl, "-i", scrimPath];
   for (const p of chunkPngPaths) args.push("-i", p);
 
   let filter =
     "[0:v]scale=1080:1920:force_original_aspect_ratio=increase," +
-    "crop=1080:1920,setsar=1,fps=30[bg]";
-  let prevLabel = "bg";
+    "crop=1080:1920,setsar=1,fps=30[bg];" +
+    // input 1 is the scrim: on for the entire clip, so it never blinks between phrases.
+    "[bg][1:v]overlay=0:0[scrim]";
+  let prevLabel = "scrim";
   const lastChunk = chunks.length - 1;
   chunks.forEach((chunk, i) => {
-    const inputIdx = i + 1; // input 0 is the video; overlays start at 1
+    const inputIdx = i + 2; // 0 is the video, 1 is the scrim, words start at 2
     const outLabel = i === lastChunk ? "vout" : `v${i}`;
-    // Each chunk PNG carries the dark scrim as well as its text, so showing a chunk only
-    // while its own words are spoken made the scrim blink out in every pause between
-    // phrases. Chunks are held until the next one takes over (and the first/last stretch
-    // to the clip edges), which keeps the scrim continuously on screen while the text
-    // swaps underneath it -- also how ordinary subtitles behave. The epsilon stops two
-    // overlays being enabled on the same frame, which would double-darken the scrim.
-    const from = i === 0 ? 0 : chunk.start;
-    const to = i === lastChunk ? duration : chunks[i + 1].start - 0.001;
-    filter += `;[${prevLabel}][${inputIdx}:v]overlay=0:0:enable='between(t,${from},${to})'[${outLabel}]`;
+    // Words appear and clear with the speech itself. They are deliberately NOT stretched
+    // to cover the pauses: doing that left a caption on screen roughly twice as long as
+    // it was spoken, which read as the subtitles not matching the mouth.
+    filter += `;[${prevLabel}][${inputIdx}:v]overlay=0:0:enable='between(t,${chunk.start},${chunk.end})'[${outLabel}]`;
     prevLabel = outLabel;
   });
-  if (chunks.length === 0) filter = filter.replace("[bg]", "[vout]");
 
   args.push(
     "-filter_complex", filter, "-map", "[vout]", "-map", "0:a?",
@@ -186,7 +188,12 @@ async function joinSegments(segmentPaths, listPath, outputPath) {
     const a = `a${i}`;
     const at = (offset - JOIN_FADE_SECONDS).toFixed(3);
     filter += `[${vLabel}][${i}:v]xfade=transition=fade:duration=${JOIN_FADE_SECONDS}:offset=${at}[${v}];`;
-    filter += `[${aLabel}][${i}:a]acrossfade=d=${JOIN_FADE_SECONDS}:c1=tri:c2=tri[${a}];`;
+    // c2=nofade: the incoming segment's first word often starts at 0.00s, so fading its
+    // audio in swallowed the opening phrase ("One last thing." was near-inaudible while
+    // its caption showed in full). The outgoing side still fades, which is inaudible
+    // anyway because snapToSentence leaves half a second of silence after its last word.
+    // Both streams still shorten by the fade length, so audio stays in step with xfade.
+    filter += `[${aLabel}][${i}:a]acrossfade=d=${JOIN_FADE_SECONDS}:c1=tri:c2=nofade[${a}];`;
     vLabel = v;
     aLabel = a;
     offset = offset + durations[i] - JOIN_FADE_SECONDS;
