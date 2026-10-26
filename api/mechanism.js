@@ -28,7 +28,7 @@ const path = require("path");
 const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
 const {
-  run, fetchCaptionPng, uploadToCloudinary, generateMusicBed, fetchMusicTrendStyle,
+  run, fetchCaptionPng, uploadToCloudinary, generateMusicBed, fetchMusicTrendStyle, lighterSource,
 } = require("../lib/shortform_utils");
 
 const DEFAULT_BEAT_DURATION = 6;
@@ -46,7 +46,7 @@ async function renderSegment(workDir, index, videoUrl, text, beatDuration) {
     "crop=1080:1920,setsar=1,fps=30[bg];[bg][1:v]overlay=0:0:format=auto[vout]";
 
   const args = [
-    "-y", "-i", videoUrl, "-i", overlayPath,
+    "-y", "-i", await lighterSource(videoUrl), "-i", overlayPath,
     "-filter_complex", filter, "-map", "[vout]", "-an",
     "-t", String(beatDuration),
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
@@ -100,9 +100,15 @@ module.exports = async (req, res) => {
     // a fast local encode -- running all four at once overlaps that fetch latency instead
     // of paying it four times. Promise.all preserves input order regardless of completion
     // order, so the concat list below still comes out in beat order.
-    const segmentPaths = await Promise.all(
-      beats.map((b, i) => renderSegment(workDir, i, b.video_url, b.text, beatDuration))
-    );
+    // Two at a time rather than all four: four simultaneous decodes are what exhausted the
+    // instance's memory on 2026-10-26, and the 180s ceiling leaves room for two passes.
+    const segmentPaths = [];
+    for (let i = 0; i < beats.length; i += 2) {
+      const pair = beats.slice(i, i + 2);
+      segmentPaths.push(...await Promise.all(
+        pair.map((b, j) => renderSegment(workDir, i + j, b.video_url, b.text, beatDuration))
+      ));
+    }
 
     const listContent = segmentPaths.map((p) => `file '${p}'`).join("\n");
     await fs.writeFile(listPath, listContent);

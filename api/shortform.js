@@ -30,7 +30,7 @@ const path = require("path");
 const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
 const {
-  run, probeDuration, fetchCaptionPng, uploadToCloudinary, generateMusicBed, fetchMusicTrendStyle,
+  run, probeDuration, fetchCaptionPng, uploadToCloudinary, generateMusicBed, fetchMusicTrendStyle, lighterSource,
 } = require("../lib/shortform_utils");
 
 const MAX_DURATION = 30; // safety ceiling regardless of variant
@@ -82,7 +82,7 @@ module.exports = async (req, res) => {
       "[0:v]scale=1080:1920:force_original_aspect_ratio=increase," +
       "crop=1080:1920,setsar=1,fps=30[bg];[bg][1:v]overlay=0:0:format=auto[vout]";
 
-    const args = ["-y", "-i", videoUrl, "-i", overlayPath];
+    const args = ["-y", "-i", await lighterSource(videoUrl), "-i", overlayPath];
     if (variant === "Voiced") args.push("-i", audioUrl);
 
     args.push("-filter_complex", filter, "-map", "[vout]");
