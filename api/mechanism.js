@@ -29,6 +29,7 @@ const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
 const {
   run, fetchCaptionPng, uploadToCloudinary, generateMusicBed, fetchMusicTrendStyle, lighterSource,
+  holdOpen,
 } = require("../lib/shortform_utils");
 
 const DEFAULT_BEAT_DURATION = 6;
@@ -93,6 +94,8 @@ module.exports = async (req, res) => {
   const outputPath = path.join(workDir, "output.mp4");
   const listPath = path.join(workDir, "list.txt");
 
+  const reply = holdOpen(res);
+
   try {
     // Rendered concurrently, not sequentially: a live timing test hit 60.03s end to end,
     // right at Vercel Hobby's hard 60s cap (confirmed by the same call dropping outright
@@ -133,9 +136,9 @@ module.exports = async (req, res) => {
     ]);
 
     const outputUrl = await uploadToCloudinary(outputPath);
-    res.status(200).json({ output_url: outputUrl });
+    reply.done({ output_url: outputUrl });
   } catch (err) {
-    res.status(500).json({ error: String(err && err.message || err), stderr: err && err.stderr });
+    reply.fail(err);
   } finally {
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }

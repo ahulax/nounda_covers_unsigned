@@ -31,6 +31,7 @@ const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
 const {
   run, probeDuration, fetchCaptionPng, uploadToCloudinary, generateMusicBed, fetchMusicTrendStyle, lighterSource,
+  holdOpen,
 } = require("../lib/shortform_utils");
 
 const MAX_DURATION = 30; // safety ceiling regardless of variant
@@ -63,6 +64,8 @@ module.exports = async (req, res) => {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "sf-"));
   const overlayPath = path.join(workDir, "overlay.png");
   const outputPath = path.join(workDir, "output.mp4");
+
+  const reply = holdOpen(res);
 
   try {
     const png = await fetchCaptionPng(hookText, supportingLine);
@@ -118,9 +121,9 @@ module.exports = async (req, res) => {
     }
 
     const outputUrl = await uploadToCloudinary(outputPath);
-    res.status(200).json({ output_url: outputUrl });
+    reply.done({ output_url: outputUrl });
   } catch (err) {
-    res.status(500).json({ error: String(err && err.message || err), stderr: err && err.stderr });
+    reply.fail(err);
   } finally {
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
