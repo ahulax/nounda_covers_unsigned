@@ -57,6 +57,15 @@ const SEGMENT_FIELDS = {
   closing: { url: "Closing Video URL", analysis: "Closing Analysis JSON" },
 };
 
+// A 9:16 window keeps only the middle third of a 16:9 frame. The 2026-10 avatar is framed
+// right of centre (face at ~60% of the width), so a centred crop sliced his face in half
+// and three reels were rejected for it. The record says where its presenter sits; older
+// avatars were centred, hence the 0.5 default when the field is empty.
+function cropCenter(fields) {
+  const c = Number(fields["Cutdown Crop Center"]);
+  return c > 0 && c < 1 ? c : 0.5;
+}
+
 async function renderClip(workDir, index, clip, fields) {
   const { segment } = clip;
   const fieldNames = SEGMENT_FIELDS[segment];
@@ -120,7 +129,7 @@ async function renderClip(workDir, index, clip, fields) {
 
   let filter =
     "[0:v]scale=1080:1920:force_original_aspect_ratio=increase," +
-    "crop=1080:1920,setsar=1,fps=30[bg];" +
+    `crop=1080:1920:x='min(max(iw*${cropCenter(fields)}-540,0),iw-1080)':y=0,setsar=1,fps=30[bg];` +
     // input 1 is the scrim: on for the entire clip, so it never blinks between phrases.
     "[bg][1:v]overlay=0:0[scrim]";
   let prevLabel = "scrim";
