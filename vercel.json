@@ -15,7 +15,7 @@
     },
     "api/cutdown.js": {
       "memory": 2048,
-      "maxDuration": 180
+      "maxDuration": 300
     }
   }
 }
