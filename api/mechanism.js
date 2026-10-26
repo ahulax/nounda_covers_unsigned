@@ -50,6 +50,10 @@ async function renderSegment(workDir, index, videoUrl, text, beatDuration) {
     "-filter_complex", filter, "-map", "[vout]", "-an",
     "-t", String(beatDuration),
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+    // Four of these run at once. Left to pick its own thread count each encoder sizes its
+    // frame buffers for every core it sees, and on 2026-10-26 two overlapping renders on
+    // one instance were killed for running out of memory.
+    "-threads", "2",
     segmentPath,
   ];
 
