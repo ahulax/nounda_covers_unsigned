@@ -40,7 +40,7 @@ const path = require("path");
 const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
 const {
-  run, uploadToCloudinary, fetchChunkCaptionPng, fetchChunkScrimPng, fetchAirtableRecord,
+  run, uploadVideo, fetchChunkCaptionPng, fetchChunkScrimPng, fetchAirtableRecord,
   parseSegmentAnalysis, wordsInWindow, chunkWords, snapToSentence, probeDuration,
   holdOpen,
 } = require("../lib/shortform_utils");
@@ -255,7 +255,7 @@ module.exports = async (req, res) => {
 
     await joinSegments(segmentPaths, listPath, outputPath);
 
-    const outputUrl = await uploadToCloudinary(outputPath);
+    const outputUrl = await uploadVideo(outputPath);
     reply.done({ output_url: outputUrl });
   } catch (err) {
     reply.fail(err);

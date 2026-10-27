@@ -30,7 +30,7 @@ const path = require("path");
 const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
 const {
-  run, probeDuration, fetchCaptionPng, uploadToCloudinary, generateMusicBed, fetchMusicTrendStyle, lighterSource,
+  run, probeDuration, fetchCaptionPng, uploadVideo, generateMusicBed, fetchMusicTrendStyle, lighterSource,
   holdOpen,
 } = require("../lib/shortform_utils");
 
@@ -120,7 +120,7 @@ module.exports = async (req, res) => {
       ]);
     }
 
-    const outputUrl = await uploadToCloudinary(outputPath);
+    const outputUrl = await uploadVideo(outputPath);
     reply.done({ output_url: outputUrl });
   } catch (err) {
     reply.fail(err);
