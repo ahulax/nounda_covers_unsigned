@@ -81,6 +81,7 @@ def render_cover(portrait: Image.Image, concept: dict) -> Image.Image:
     word = (concept.get("word") or "").strip()
     supporting = (concept.get("supporting") or "").strip()
     headline = (concept.get("headline") or "").strip()
+    highlight = (concept.get("highlight") or "").strip()  # optional word or phrase of the headline to put in the chip
     kicker = (concept.get("kicker") or "Nounda").strip()
 
     img = _scrim(_grade(portrait.convert("RGB"))).convert("RGBA")
@@ -128,11 +129,16 @@ def render_cover(portrait: Image.Image, concept: dict) -> Image.Image:
         block = ink_h + unit_h + (int(30 * S) + lh * len(lines) if lines else 0)
         y = centre(block)
         d.text((PAD - nb[0], y - nb[1]), number, font=nf, fill=CREAM)
+        # The unit is the highlight: a white chip with a glow (see _chip).
+        uf = ImageFont.truetype(PF700, int(uf.size * 0.82))
+        ub = uf.getbbox(unit)
         if stacked:
-            d.text((PAD - ub[0], y + ink_h + int(18 * S) - ub[1]), unit, font=uf, fill=GOLD)
+            img, _ = _chip(img, PAD + int(22 * S), y + ink_h + int(40 * S), unit, uf)
+            unit_h = (ub[3] - ub[1]) + int(58 * S)
         else:
-            d.text((PAD + d.textlength(number, font=nf) + int(24 * S),
-                    y + ink_h - (ub[3] - ub[1]) - ub[1]), unit, font=uf, fill=GOLD)
+            img, _ = _chip(img, PAD + d.textlength(number, font=nf) + int(46 * S),
+                           y + ink_h - (ub[3] - ub[1]), unit, uf)
+        d = ImageDraw.Draw(img)
         y += ink_h + unit_h + int(30 * S)
         for ln in lines:
             d.text((PAD, y), ln, font=hf, fill=CREAM)
@@ -141,6 +147,11 @@ def render_cover(portrait: Image.Image, concept: dict) -> Image.Image:
         # HEADLINE COVER (layout "C"): a big Playfair question or statement, up to four
         # lines, a short gold rule under it. No numeral, no supporting line: the title
         # completes the thought.
+        # Keep the highlighted phrase on one line: glue its words for wrapping, unglue to draw.
+        GLUE = "\u2060"  # word joiner: not whitespace, so wrapping keeps the phrase together
+        if highlight and highlight.lower() in headline.lower():
+            i = headline.lower().index(highlight.lower())
+            headline = headline[:i] + headline[i:i + len(highlight)].replace(" ", GLUE) + headline[i + len(highlight):]
         longest = max(headline.split(), key=len) if headline else ""
         hf = _fit(PF700, longest, int(112 * S), MAXW)  # only the longest WORD must fit the column
         lines = _wrap(headline, hf, MAXW, d)
@@ -149,15 +160,57 @@ def render_cover(portrait: Image.Image, concept: dict) -> Image.Image:
             lines = _wrap(headline, hf, MAXW, d)
         lh = int(hf.size * 1.04)
         y = centre(lh * len(lines))
+        mark = (highlight or "").strip().lower()
+        lines = [ln.replace(GLUE, " ") for ln in lines]
+        # Pass 1: the chip (glow and box) goes down first, so its glow never washes over text.
+        # Pass 2: all plain text on top. The chip word uses a slightly smaller face to sit
+        # inside the line height.
+        cf = ImageFont.truetype(PF700, int(hf.size * 0.84))
+        runs, yy = [], y
         for ln in lines:
-            d.text((PAD, y), ln, font=hf, fill=CREAM)
-            y += lh
+            if mark and mark in ln.lower():
+                yy += int(hf.size * 0.1)  # breathing room above the chip line
+                k = ln.lower().index(mark)
+                before, word_, after = ln[:k], ln[k:k + len(mark)], ln[k + len(mark):]
+                x = PAD + int(d.textlength(before, font=hf))
+                img, cw = _chip(img, x + int(16 * S), yy + int(hf.size * 0.2), word_, cf, pad_y=int(8 * S))
+                d = ImageDraw.Draw(img)
+                runs.append((PAD, yy, before))
+                runs.append((x + cw + int(12 * S), yy, after.lstrip()))
+                mark = ""
+                yy += int(hf.size * 0.08)
+            else:
+                runs.append((PAD, yy, ln))
+            yy += lh
+        for rx, ry, txt in runs:
+            if txt: d.text((rx, ry), txt, font=hf, fill=CREAM)
+        y = yy
         d.rectangle([PAD, y + int(30 * S), PAD + int(100 * S), y + int(36 * S)], fill=GOLD)  # clear of descenders
 
     lg = Image.open(LOGO).convert("RGBA").resize((logo_px, logo_px), Image.LANCZOS)
     img.alpha_composite(lg, (PAD - int(4 * S), logo_y))
     return img.convert("RGB")
 
+
+
+def _chip(img, x, y, text, font, pad_y=None):
+    """The highlight: ink text on a white chip with a soft white glow around it (the monochrome
+    stand-in for the old gold box, matching the site's glowing accents). x, y = top-left of the
+    text box. Returns (image, chip width)."""
+    from PIL import ImageFilter
+    d0 = ImageDraw.Draw(img)
+    tb = font.getbbox(text)
+    tw, th = d0.textlength(text, font=font), tb[3] - tb[1]
+    px, py = int(22 * S), (int(14 * S) if pad_y is None else pad_y)
+    box = [x - px, y - py, x + tw + px, y + th + py]
+    glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(glow).rectangle(box, fill=(255, 255, 255, 235))
+    img = Image.alpha_composite(img, glow.filter(ImageFilter.GaussianBlur(int(40 * S))))
+    img = Image.alpha_composite(img, glow.filter(ImageFilter.GaussianBlur(int(12 * S))))
+    d1 = ImageDraw.Draw(img)
+    d1.rectangle(box, fill=(255, 255, 255, 255))
+    d1.text((x - tb[0], y - tb[1]), text, font=font, fill=DARKW)
+    return img, int(tw + 2 * px)
 
 def _wrap(text, font, max_w, draw):
     """Wrap on width, honouring any explicit newlines the concept already contains."""
