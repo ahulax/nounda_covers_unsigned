@@ -110,7 +110,7 @@ module.exports = async (req, res) => {
 
     if (variant === "Silent") {
       const moodNote = await fetchMusicTrendStyle();
-      const musicPath = await generateMusicBed(targetDuration, workDir, moodNote);
+      const musicPath = await generateMusicBed(targetDuration, workDir, moodNote, (req.body && req.body.music_url) || null);
       await run(ffmpegPath, [
         "-y", "-i", renderPath, "-i", musicPath,
         "-map", "0:v", "-map", "1:a",

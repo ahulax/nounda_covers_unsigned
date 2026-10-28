@@ -125,7 +125,7 @@ module.exports = async (req, res) => {
 
     const totalDuration = beatDuration * beats.length;
     const moodNote = await fetchMusicTrendStyle();
-    const musicPath = await generateMusicBed(totalDuration, workDir, moodNote);
+    const musicPath = await generateMusicBed(totalDuration, workDir, moodNote, (req.body && req.body.music_url) || null);
 
     await run(ffmpegPath, [
       "-y", "-i", silentPath, "-i", musicPath,
