@@ -31,7 +31,7 @@ const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
 const {
   run, probeDuration, fetchCaptionPng, uploadVideo, generateMusicBed, fetchMusicTrendStyle, lighterSource,
-  holdOpen,
+  holdOpen, frostedFilter,
 } = require("../lib/shortform_utils");
 
 const MAX_DURATION = 30; // safety ceiling regardless of variant
@@ -70,6 +70,8 @@ module.exports = async (req, res) => {
   try {
     const png = await fetchCaptionPng(hookText, supportingLine);
     await fs.writeFile(overlayPath, png);
+    const maskPath = path.join(workDir, "mask.png");
+    await fs.writeFile(maskPath, await fetchCaptionPng(hookText, supportingLine, { mask: true }));
 
     // -shortest alone does not reliably stop encoding at the shorter stream's end
     // when the video is fed through -filter_complex (verified empirically: it kept
@@ -83,10 +85,12 @@ module.exports = async (req, res) => {
 
     const filter =
       "[0:v]scale=1080:1920:force_original_aspect_ratio=increase," +
-      "crop=1080:1920,setsar=1,fps=30,eq=saturation=0.6:contrast=1.06:brightness=-0.01[bg];[bg][1:v]overlay=0:0:format=auto[vout]"; // one b-roll grade, same as the long-form videos
+      "crop=1080:1920,setsar=1,fps=30,eq=saturation=0.6:contrast=1.06:brightness=-0.01[bg];" + // one b-roll grade, same as the long-form videos
+      frostedFilter("bg", 1, variant === "Voiced" ? 3 : 2, "vout");
 
     const args = ["-y", "-i", await lighterSource(videoUrl), "-i", overlayPath];
     if (variant === "Voiced") args.push("-i", audioUrl);
+    args.push("-loop", "1", "-t", String(targetDuration + 1), "-i", maskPath);
 
     args.push("-filter_complex", filter, "-map", "[vout]");
     if (variant === "Voiced") {

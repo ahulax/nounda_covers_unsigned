@@ -115,12 +115,15 @@ async function renderClip(workDir, index, clip, fields) {
   const scrimPath = path.join(workDir, `clip${index}-scrim.png`);
   await fs.writeFile(scrimPath, await fetchChunkScrimPng());
 
-  const chunkPngPaths = [];
+  const chunkPngPaths = [], maskPngPaths = [];
   for (let i = 0; i < chunks.length; i++) {
     const png = await fetchChunkCaptionPng(chunks[i].text, { text_only: true });
     const p = path.join(workDir, `clip${index}-chunk${i}.png`);
     await fs.writeFile(p, png);
     chunkPngPaths.push(p);
+    const mp = path.join(workDir, `clip${index}-mask${i}.png`);
+    await fs.writeFile(mp, await fetchChunkCaptionPng(chunks[i].text, { mask: true }));
+    maskPngPaths.push(mp);
   }
 
   const segmentPath = path.join(workDir, `segment-${index}.mp4`);
@@ -130,17 +133,26 @@ async function renderClip(workDir, index, clip, fields) {
   // by a local test where a 25.86s intended trim came out as 59.78s (the untrimmed
   // remainder from the seek point) until this was fixed.
   const args = ["-y", "-ss", String(start), "-t", String(duration), "-i", videoUrl, "-i", scrimPath];
+  // input 2: a black frame the length of the clip, on which each chunk's glass mask is shown
+  // only while that chunk is spoken, so one blur pass serves every caption.
+  args.push("-f", "lavfi", "-t", String(duration), "-i", "color=c=black:s=1080x1920:r=30");
   for (const p of chunkPngPaths) args.push("-i", p);
+  for (const p of maskPngPaths) args.push("-i", p);
+  const N = chunks.length, maskBase = 3 + N;
 
   let filter =
     "[0:v]scale=1080:1920:force_original_aspect_ratio=increase," +
     `crop=1080:1920:x='min(max(iw*${cropCenter(fields, clip)}-540,0),iw-1080)':y=0,setsar=1,fps=30[bg];` +
     // input 1 is the scrim: on for the entire clip, so it never blinks between phrases.
-    "[bg][1:v]overlay=0:0[scrim]";
+    "[bg][1:v]overlay=0:0[scr];[scr]split[base][bsrc];[bsrc]gblur=sigma=30,eq=brightness=0.02[blur];[2:v]null[k0]";
+  chunks.forEach((chunk, i) => {
+    filter += `;[k${i}][${maskBase + i}:v]overlay=0:0:enable='between(t,${chunk.start},${chunk.end})'[k${i + 1}]`;
+  });
+  filter += `;[k${N}]format=gray[kmask];[blur][kmask]alphamerge[glass];[base][glass]overlay=0:0[scrim]`;
   let prevLabel = "scrim";
   const lastChunk = chunks.length - 1;
   chunks.forEach((chunk, i) => {
-    const inputIdx = i + 2; // 0 is the video, 1 is the scrim, words start at 2
+    const inputIdx = i + 3; // 0 video, 1 scrim, 2 black mask base, words start at 3
     const outLabel = i === lastChunk ? "vout" : `v${i}`;
     // Words appear and clear with the speech itself. They are deliberately NOT stretched
     // to cover the pauses: doing that left a caption on screen roughly twice as long as

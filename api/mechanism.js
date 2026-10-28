@@ -28,7 +28,7 @@ const path = require("path");
 const os = require("os");
 const ffmpegPath = require("ffmpeg-static");
 const {
-  run, fetchCaptionPng, uploadVideo, generateMusicBed, fetchMusicTrendStyle, lighterSource,
+  run, fetchCaptionPng, frostedFilter, uploadVideo, generateMusicBed, fetchMusicTrendStyle, lighterSource,
   holdOpen,
 } = require("../lib/shortform_utils");
 
@@ -41,13 +41,16 @@ async function renderSegment(workDir, index, videoUrl, text, beatDuration) {
 
   const png = await fetchCaptionPng(text, "");
   await fs.writeFile(overlayPath, png);
+  const maskPath = path.join(workDir, `mask-${index}.png`);
+  await fs.writeFile(maskPath, await fetchCaptionPng(text, "", { mask: true }));
 
   const filter =
     "[0:v]scale=1080:1920:force_original_aspect_ratio=increase," +
-    "crop=1080:1920,setsar=1,fps=30,eq=saturation=0.6:contrast=1.06:brightness=-0.01[bg];[bg][1:v]overlay=0:0:format=auto[vout]"; // one b-roll grade, same as the long-form videos
+    "crop=1080:1920,setsar=1,fps=30,eq=saturation=0.6:contrast=1.06:brightness=-0.01[bg];" + // one b-roll grade, same as the long-form videos
+    frostedFilter("bg", 1, 2, "vout");
 
   const args = [
-    "-y", "-i", await lighterSource(videoUrl), "-i", overlayPath,
+    "-y", "-i", await lighterSource(videoUrl), "-i", overlayPath, "-loop", "1", "-t", String(beatDuration), "-i", maskPath,
     "-filter_complex", filter, "-map", "[vout]", "-an",
     "-t", String(beatDuration),
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",

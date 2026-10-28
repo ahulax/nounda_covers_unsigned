@@ -384,7 +384,7 @@ class handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("content-length") or 0)
             body = json.loads(self.rfile.read(length) or b"{}")
-            img = render_caption(body.get("hook_text", ""), body.get("supporting_line", ""))
+            img = render_caption(body.get("hook_text", ""), body.get("supporting_line", ""), body.get("label") or "Field notes", mask=bool(body.get("mask")))
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             data = buf.getvalue()
@@ -404,7 +404,7 @@ class handler(BaseHTTPRequestHandler):
             if body.get("scrim_only"):
                 img = render_chunk_scrim()
             else:
-                img = render_chunk_caption(body.get("text", ""), with_scrim=not body.get("text_only"))
+                img = render_chunk_caption(body.get("text", ""), with_scrim=not body.get("text_only"), mask=bool(body.get("mask")))
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             data = buf.getvalue()

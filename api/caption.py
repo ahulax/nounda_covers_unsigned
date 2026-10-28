@@ -125,65 +125,72 @@ def _glow_text(img, xy, text, font, strength=0.8):
     return img
 
 
-def _strip(img, x, y, text, font, pad=22):
-    """Daniil, 2026-10-28: no boxes over the face. Behind each line of text sits only a thin
-    frosted strip (about half the line height, through the middle of the letters), soft at both
-    ends, with a hairline on top: enough to hold the type on bright footage, nothing more."""
-    from PIL import ImageFilter
-    d = ImageDraw.Draw(img)
-    bb = font.getbbox(text)
-    tw = d.textlength(text, font=font)
-    mid = y + (bb[1] + bb[3]) / 2
-    sh = max(16, int(font.size * 0.62))
-    w, h = int(tw + 2 * pad), sh
-    band = Image.new("RGBA", (w, h), (31, 31, 29, 178))
-    noise = Image.effect_noise((w, h), 70).convert("L").point(lambda v: int(v * 0.12))
-    grain = Image.new("RGBA", (w, h), (255, 255, 255, 0)); grain.putalpha(noise)
-    band = Image.alpha_composite(band, grain)
-    fade = Image.new("L", (w, 1), 0)
-    for i in range(w):
-        e = min(i, w - 1 - i) / max(1, pad * 1.6)
-        fade.putpixel((i, 0), int(255 * min(1, e)))
-    fade = fade.resize((w, h))
-    a = band.getchannel("A").point(lambda v: v)
-    band.putalpha(Image.composite(a, Image.new("L", (w, h), 0), fade))
-    ImageDraw.Draw(band).line([(pad, 0), (w - pad, 0)], fill=(255, 255, 255, 70), width=1)
-    img.alpha_composite(band.filter(ImageFilter.GaussianBlur(0.6)), (int(x - pad), int(mid - h / 2)))
-    # a soft shadow keeps the letter edges clean where they leave the strip
-    sh_l = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    ImageDraw.Draw(sh_l).text((x, y), text, font=font, fill=(0, 0, 0, 150))
-    return Image.alpha_composite(img, sh_l.filter(ImageFilter.GaussianBlur(6)))
+def _glass_deco(img, box, radius):
+    """What the overlay draws for a frosted panel (the blur itself is done by ffmpeg through the
+    matching mask): a light dark tint for legibility, a faint white lift, grain, a bright hairline
+    border and a top sheen, like the approved thumbnail option B card."""
+    x0, y0, x1, y1 = [int(v) for v in box]
+    w, h = x1 - x0, y1 - y0
+    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    m = Image.new("L", (w, h), 0); ImageDraw.Draw(m).rounded_rectangle([0, 0, w - 1, h - 1], radius, fill=255)
+    tint = Image.new("RGBA", (w, h), (31, 31, 29, 92))
+    tint = Image.alpha_composite(tint, Image.new("RGBA", (w, h), (255, 255, 255, 14)))
+    noise = Image.effect_noise((w, h), 70).convert("L").point(lambda v: int(v * 0.08))
+    g = Image.new("RGBA", (w, h), (255, 255, 255, 0)); g.putalpha(noise)
+    tint = Image.alpha_composite(tint, g)
+    layer.paste(tint, (0, 0), m)
+    d = ImageDraw.Draw(layer)
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius, outline=(255, 255, 255, 150), width=2)
+    d.line([(radius, 3), (w - radius, 3)], fill=(255, 255, 255, 170), width=2)
+    img.alpha_composite(layer, (x0, y0))
+    return img
 
 
-def render_caption(hook_text: str, supporting_line: str = "", label: str = "Field notes") -> Image.Image:
-    """Hook caption for Formats B and C (2026-10-28): no card. A tracked label, the hook in two
-    weights (set-up Playfair 400, payoff Playfair 900 in white with the glow) and the supporting
-    line, each line on a thin frosted strip, low in the safe zone so the picture stays open."""
+def _mask(boxes, radius):
+    """White where the footage should be blurred (the glass shapes), black elsewhere."""
+    m = Image.new("L", (W, H), 0); d = ImageDraw.Draw(m)
+    for b in boxes:
+        d.rounded_rectangle([int(v) for v in b], radius, fill=255)
+    return m.convert("RGB")
+
+
+def render_caption(hook_text: str, supporting_line: str = "", label: str = "Field notes", mask: bool = False) -> Image.Image:
+    """Hook caption for Formats B and C: a real frosted glass card (ffmpeg blurs the footage
+    through the mask=True version of this layout), with a tracked label, the hook in two weights
+    (set-up Playfair 400, payoff Playfair 900 in white with the glow) and the supporting line.
+    Anchored low in the safe zone so most of the picture stays open."""
     hook_text = (hook_text or "").strip()
     supporting_line = (supporting_line or "").strip()
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
+    pad = 54
+    inner = W - 2 * MARGIN - 2 * pad
     set_up, payoff = _split_hook(hook_text)
-    rf, r_lines = _fit_wrapped(d, set_up, PF400, MAXW, start_size=70, min_size=44, max_lines=3) if set_up else (None, [])
-    bf, b_lines = _fit_wrapped(d, payoff, PF900, MAXW, start_size=92, min_size=56, max_lines=2) if payoff else (None, [])
-    sf, s_lines = _fit_wrapped(d, supporting_line, IN500, MAXW, start_size=30, min_size=24, max_lines=3) if supporting_line else (None, [])
+    rf, r_lines = _fit_wrapped(d, set_up, PF400, inner, start_size=68, min_size=42, max_lines=3) if set_up else (None, [])
+    bf, b_lines = _fit_wrapped(d, payoff, PF900, inner, start_size=88, min_size=52, max_lines=2) if payoff else (None, [])
+    sf, s_lines = _fit_wrapped(d, supporting_line, IN400, inner, start_size=30, min_size=24, max_lines=3) if supporting_line else (None, [])
     lf = ImageFont.truetype(IN500, 24)
-    rows = [("label", lf, (label or "Field notes").upper(), 44)] + [("r", rf, l, int(rf.size * 1.18)) for l in r_lines] \
-        + [("b", bf, l, int(bf.size * 1.08)) for l in b_lines] + ([("gap", None, "", 18)] if s_lines else []) \
-        + [("s", sf, l, int(sf.size * 1.5)) for l in s_lines]
-    block = sum(r[3] for r in rows)
-    y = SAFE_BOTTOM - block - 30
-    x = MARGIN + 6
-    for kind, f, text, lh in rows:
-        if kind == "label":
-            img = _strip(img, x, y, text, f, pad=16); d = ImageDraw.Draw(img); tx = x
-            for ch in text:
-                d.text((tx, y), ch, font=f, fill=(247, 246, 242, 210)); tx += d.textlength(ch, font=f) + 4
-        elif kind == "b":
-            img = _strip(img, x, y, text, f); img = _glow_text(img, (x - 2, y), text, f)
-        elif kind in ("r", "s"):
-            img = _strip(img, x, y, text, f); ImageDraw.Draw(img).text((x, y), text, font=f, fill=CREAM if kind == "r" else (230, 229, 224))
-        y += lh
+    rows_h = (int(rf.size * 1.12) * len(r_lines) if rf else 0) + (int(bf.size * 1.04) * len(b_lines) if bf else 0)
+    card_h = pad + 30 + 40 + rows_h + ((30 + int(sf.size * 1.4) * len(s_lines)) if s_lines else 0) + pad
+    box = (MARGIN, SAFE_BOTTOM - card_h - 20, W - MARGIN, SAFE_BOTTOM - 20)
+    if mask:
+        return _mask([box], 30)
+    img = _glass_deco(img, box, 30)
+    d = ImageDraw.Draw(img)
+    x, y = box[0] + pad, box[1] + pad
+    tx = x
+    for ch in (label or "Field notes").upper():
+        d.text((tx, y), ch, font=lf, fill=(247, 246, 242, 200)); tx += d.textlength(ch, font=lf) + 4
+    y += 30 + 40
+    for ln in r_lines:
+        d.text((x, y), ln, font=rf, fill=CREAM); y += int(rf.size * 1.12)
+    for ln in b_lines:
+        img = _glow_text(img, (x - 2, y), ln, bf); y += int(bf.size * 1.04)
+    d = ImageDraw.Draw(img)
+    if s_lines:
+        y += 30
+        for ln in s_lines:
+            d.text((x, y), ln, font=sf, fill=(235, 234, 229)); y += int(sf.size * 1.4)
     return img
 
 
@@ -205,19 +212,29 @@ def render_chunk_scrim() -> Image.Image:
     return img
 
 
-def render_chunk_caption(text: str, with_scrim: bool = True) -> Image.Image:
-    """A short (3-5 word) spoken-caption chunk for Format A, on thin frosted strips (no box), low
-    in the safe zone so the presenter's face stays clear."""
+def render_chunk_caption(text: str, with_scrim: bool = True, mask: bool = False) -> Image.Image:
+    """A short (3-5 word) spoken-caption chunk for Format A: each line on its own slim frosted
+    glass pill that hugs the words (real blur through the mask=True version), low in the safe
+    zone so the presenter's face stays clear (Daniil, 2026-10-28)."""
     text = (text or "").strip()
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    f, lines = _fit_wrapped(d, text, PF400, MAXW, start_size=64, min_size=40, max_lines=2)
-    lh = int(f.size * 1.22)
+    f, lines = _fit_wrapped(d, text, PF400, MAXW - 40, start_size=60, min_size=40, max_lines=2)
+    lh = int(f.size * 1.34)
+    px, py = 26, 13
+    boxes, y = [], SAFE_BOTTOM - lh * len(lines) - 40
+    for ln in lines:
+        bb = f.getbbox(ln)
+        boxes.append((MARGIN - px, y + bb[1] - py, MARGIN + d.textlength(ln, font=f) + px, y + bb[3] + py))
+        y += lh
+    if mask:
+        return _mask(boxes, 18)
     if with_scrim:
         img = Image.alpha_composite(img, render_chunk_scrim())
+    for b in boxes:
+        img = _glass_deco(img, b, 18)
+    d = ImageDraw.Draw(img)
     y = SAFE_BOTTOM - lh * len(lines) - 40
     for ln in lines:
-        img = _strip(img, MARGIN + 6, y, ln, f)
-        ImageDraw.Draw(img).text((MARGIN + 6, y), ln, font=f, fill=CREAM)
-        y += lh
+        d.text((MARGIN, y), ln, font=f, fill=CREAM); y += lh
     return img
