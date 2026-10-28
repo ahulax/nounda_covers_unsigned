@@ -203,10 +203,17 @@ def _chip(img, x, y, text, font, pad_y=None):
     tw, th = d0.textlength(text, font=font), tb[3] - tb[1]
     px, py = int(22 * S), (int(14 * S) if pad_y is None else pad_y)
     box = [x - px, y - py, x + tw + px, y + th + py]
+    # Three layers of light so the chip reads as lit from behind: a wide soft bloom, a bright
+    # halo hugging the box, and a tight edge glow.
+    e = int(34 * S)
+    wide = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(wide).rectangle([box[0] - e, box[1] - e, box[2] + e, box[3] + e], fill=(255, 255, 255, 120))
+    img = Image.alpha_composite(img, wide.filter(ImageFilter.GaussianBlur(int(80 * S))))
     glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    ImageDraw.Draw(glow).rectangle(box, fill=(255, 255, 255, 235))
-    img = Image.alpha_composite(img, glow.filter(ImageFilter.GaussianBlur(int(40 * S))))
-    img = Image.alpha_composite(img, glow.filter(ImageFilter.GaussianBlur(int(12 * S))))
+    ImageDraw.Draw(glow).rectangle(box, fill=(255, 255, 255, 255))
+    halo = glow.filter(ImageFilter.GaussianBlur(int(28 * S)))
+    img = Image.alpha_composite(Image.alpha_composite(img, halo), halo)
+    img = Image.alpha_composite(img, glow.filter(ImageFilter.GaussianBlur(int(9 * S))))
     d1 = ImageDraw.Draw(img)
     d1.rectangle(box, fill=(255, 255, 255, 255))
     d1.text((x - tb[0], y - tb[1]), text, font=font, fill=DARKW)
