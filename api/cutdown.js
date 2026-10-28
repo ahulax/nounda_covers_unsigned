@@ -62,9 +62,13 @@ const SEGMENT_FIELDS = {
 // right of centre (face at ~60% of the width), so a centred crop sliced his face in half
 // and three reels were rejected for it. The record says where its presenter sits; older
 // avatars were centred, hence the 0.5 default when the field is empty.
-function cropCenter(fields) {
-  const c = Number(fields["Cutdown Crop Center"]);
-  return c > 0 && c < 1 ? c : 0.5;
+// Since 2026-10-28 the Short-form producer measures the face itself (Apple Vision, tools/face on
+// the Mac) and sends crop_center per clip or for the whole request; that wins over the record.
+function cropCenter(fields, clip) {
+  for (const v of [clip && clip.crop_center, fields.__cropCenter, fields["Cutdown Crop Center"]]) {
+    const c = Number(v); if (c > 0 && c < 1) return Math.min(Math.max(c, 0.28), 0.72);
+  }
+  return 0.5;
 }
 
 async function renderClip(workDir, index, clip, fields) {
@@ -130,7 +134,7 @@ async function renderClip(workDir, index, clip, fields) {
 
   let filter =
     "[0:v]scale=1080:1920:force_original_aspect_ratio=increase," +
-    `crop=1080:1920:x='min(max(iw*${cropCenter(fields)}-540,0),iw-1080)':y=0,setsar=1,fps=30[bg];` +
+    `crop=1080:1920:x='min(max(iw*${cropCenter(fields, clip)}-540,0),iw-1080)':y=0,setsar=1,fps=30[bg];` +
     // input 1 is the scrim: on for the entire clip, so it never blinks between phrases.
     "[bg][1:v]overlay=0:0[scrim]";
   let prevLabel = "scrim";
@@ -251,6 +255,7 @@ module.exports = async (req, res) => {
 
   try {
     const fields = await fetchAirtableRecord(VIDEO_BASE_ID, VIDEO_TABLE_ID, recordId);
+    if (body.crop_center) fields.__cropCenter = body.crop_center;
     const segmentPaths = await Promise.all(clips.map((c, i) => renderClip(workDir, i, c, fields)));
 
     await joinSegments(segmentPaths, listPath, outputPath);

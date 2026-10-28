@@ -125,44 +125,65 @@ def _glow_text(img, xy, text, font, strength=0.8):
     return img
 
 
+def _strip(img, x, y, text, font, pad=22):
+    """Daniil, 2026-10-28: no boxes over the face. Behind each line of text sits only a thin
+    frosted strip (about half the line height, through the middle of the letters), soft at both
+    ends, with a hairline on top: enough to hold the type on bright footage, nothing more."""
+    from PIL import ImageFilter
+    d = ImageDraw.Draw(img)
+    bb = font.getbbox(text)
+    tw = d.textlength(text, font=font)
+    mid = y + (bb[1] + bb[3]) / 2
+    sh = max(16, int(font.size * 0.62))
+    w, h = int(tw + 2 * pad), sh
+    band = Image.new("RGBA", (w, h), (31, 31, 29, 178))
+    noise = Image.effect_noise((w, h), 70).convert("L").point(lambda v: int(v * 0.12))
+    grain = Image.new("RGBA", (w, h), (255, 255, 255, 0)); grain.putalpha(noise)
+    band = Image.alpha_composite(band, grain)
+    fade = Image.new("L", (w, 1), 0)
+    for i in range(w):
+        e = min(i, w - 1 - i) / max(1, pad * 1.6)
+        fade.putpixel((i, 0), int(255 * min(1, e)))
+    fade = fade.resize((w, h))
+    a = band.getchannel("A").point(lambda v: v)
+    band.putalpha(Image.composite(a, Image.new("L", (w, h), 0), fade))
+    ImageDraw.Draw(band).line([(pad, 0), (w - pad, 0)], fill=(255, 255, 255, 70), width=1)
+    img.alpha_composite(band.filter(ImageFilter.GaussianBlur(0.6)), (int(x - pad), int(mid - h / 2)))
+    # a soft shadow keeps the letter edges clean where they leave the strip
+    sh_l = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(sh_l).text((x, y), text, font=font, fill=(0, 0, 0, 150))
+    return Image.alpha_composite(img, sh_l.filter(ImageFilter.GaussianBlur(6)))
+
+
 def render_caption(hook_text: str, supporting_line: str = "", label: str = "Field notes") -> Image.Image:
-    """Hook caption for Formats B and C (2026-10-28 audit): a glass card in the safe zone with a
-    tracked label, the hook in two weights (set-up Playfair 400, payoff Playfair 900 in white
-    with the glow) and the supporting line in Inter. Replaces the warm scrim and single weight."""
+    """Hook caption for Formats B and C (2026-10-28): no card. A tracked label, the hook in two
+    weights (set-up Playfair 400, payoff Playfair 900 in white with the glow) and the supporting
+    line, each line on a thin frosted strip, low in the safe zone so the picture stays open."""
     hook_text = (hook_text or "").strip()
     supporting_line = (supporting_line or "").strip()
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    pad = 54
-    inner = W - 2 * MARGIN - 2 * pad
     set_up, payoff = _split_hook(hook_text)
-    rf, r_lines = _fit_wrapped(d, set_up, PF400, inner, start_size=72, min_size=44, max_lines=3) if set_up else (None, [])
-    bf, b_lines = _fit_wrapped(d, payoff, PF900, inner, start_size=96, min_size=56, max_lines=2) if payoff else (None, [])
-    sf, s_lines = _fit_wrapped(d, supporting_line, IN400, inner, start_size=32, min_size=26, max_lines=3) if supporting_line else (None, [])
+    rf, r_lines = _fit_wrapped(d, set_up, PF400, MAXW, start_size=70, min_size=44, max_lines=3) if set_up else (None, [])
+    bf, b_lines = _fit_wrapped(d, payoff, PF900, MAXW, start_size=92, min_size=56, max_lines=2) if payoff else (None, [])
+    sf, s_lines = _fit_wrapped(d, supporting_line, IN500, MAXW, start_size=30, min_size=24, max_lines=3) if supporting_line else (None, [])
     lf = ImageFont.truetype(IN500, 24)
-    rows_h = (int(rf.size * 1.12) * len(r_lines) if rf else 0) + (int(bf.size * 1.04) * len(b_lines) if bf else 0)
-    card_h = pad + 30 + 34 + rows_h + ((28 + int(sf.size * 1.4) * len(s_lines)) if s_lines else 0) + pad
-    card_w = W - 2 * MARGIN
-    y0 = SAFE_TOP + max(0, (SAFE_BOTTOM - SAFE_TOP - card_h) // 2) - 40
-    y0 = max(SAFE_TOP - 80, min(y0, SAFE_BOTTOM - card_h))
-    card, shadow = _glass((card_w, card_h))
-    img.alpha_composite(shadow, (MARGIN - 60, y0 - 60))
-    img.alpha_composite(card, (MARGIN, y0))
-    d = ImageDraw.Draw(img)
-    x, y = MARGIN + pad, y0 + pad
-    tx = x
-    for ch in (label or "Field notes").upper():
-        d.text((tx, y), ch, font=lf, fill=(247, 246, 242, 170)); tx += d.textlength(ch, font=lf) + 4
-    y += 30 + 34
-    for ln in r_lines:
-        d.text((x, y), ln, font=rf, fill=CREAM); y += int(rf.size * 1.12)
-    for ln in b_lines:
-        img = _glow_text(img, (x - 2, y), ln, bf); y += int(bf.size * 1.04)
-    d = ImageDraw.Draw(img)
-    if s_lines:
-        y += 34
-        for ln in s_lines:
-            d.text((x, y), ln, font=sf, fill=MUTED); y += int(sf.size * 1.4)
+    rows = [("label", lf, (label or "Field notes").upper(), 44)] + [("r", rf, l, int(rf.size * 1.18)) for l in r_lines] \
+        + [("b", bf, l, int(bf.size * 1.08)) for l in b_lines] + ([("gap", None, "", 18)] if s_lines else []) \
+        + [("s", sf, l, int(sf.size * 1.5)) for l in s_lines]
+    block = sum(r[3] for r in rows)
+    y = SAFE_BOTTOM - block - 30
+    x = MARGIN + 6
+    for kind, f, text, lh in rows:
+        if kind == "label":
+            img = _strip(img, x, y, text, f, pad=16); d = ImageDraw.Draw(img); tx = x
+            for ch in text:
+                d.text((tx, y), ch, font=f, fill=(247, 246, 242, 210)); tx += d.textlength(ch, font=f) + 4
+        elif kind == "b":
+            img = _strip(img, x, y, text, f); img = _glow_text(img, (x - 2, y), text, f)
+        elif kind in ("r", "s"):
+            img = _strip(img, x, y, text, f); ImageDraw.Draw(img).text((x, y), text, font=f, fill=CREAM if kind == "r" else (230, 229, 224))
+        y += lh
     return img
 
 
@@ -185,24 +206,18 @@ def render_chunk_scrim() -> Image.Image:
 
 
 def render_chunk_caption(text: str, with_scrim: bool = True) -> Image.Image:
-    """A short (3-5 word) spoken-caption chunk for Format A. Since the 2026-10-28 audit each
-    chunk sits on a small glass pill (the long-form subtitle surface) so it holds on bright
-    footage; the persistent scrim is still drawn under it when asked for, much softer."""
+    """A short (3-5 word) spoken-caption chunk for Format A, on thin frosted strips (no box), low
+    in the safe zone so the presenter's face stays clear."""
     text = (text or "").strip()
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    f, lines = _fit_wrapped(d, text, PF400, MAXW - 40, start_size=64, min_size=40, max_lines=2)
-    lh = int(f.size * 1.18)
-    tw = max(d.textlength(ln, font=f) for ln in lines) if lines else 0
-    pw, ph = int(tw + 2 * 40), int(lh * len(lines) + 2 * 26)
-    y0 = SAFE_TOP + max(0, (SAFE_BOTTOM - SAFE_TOP - ph) // 2)
+    f, lines = _fit_wrapped(d, text, PF400, MAXW, start_size=64, min_size=40, max_lines=2)
+    lh = int(f.size * 1.22)
     if with_scrim:
         img = Image.alpha_composite(img, render_chunk_scrim())
-    pill, shadow = _glass((pw, ph), radius=20)
-    img.alpha_composite(shadow, (MARGIN - 60, y0 - 60))
-    img.alpha_composite(pill, (MARGIN, y0))
-    d = ImageDraw.Draw(img)
-    y = y0 + 26 - int(f.size * 0.08)
+    y = SAFE_BOTTOM - lh * len(lines) - 40
     for ln in lines:
-        d.text((MARGIN + 40, y), ln, font=f, fill=CREAM); y += lh
+        img = _strip(img, MARGIN + 6, y, ln, f)
+        ImageDraw.Draw(img).text((MARGIN + 6, y), ln, font=f, fill=CREAM)
+        y += lh
     return img
