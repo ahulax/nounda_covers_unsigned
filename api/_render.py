@@ -5,9 +5,9 @@ encodes are the ones in YOUTUBE-PACKAGING-GUIDE.md §1.3:
   - warm-graded, film-grained full-bleed portrait; avatar LIT on the right
   - strong warm-dark scrim on the LEFT ONLY, fading out before it reaches the face
   - inset cream editorial frame
-  - gold accent bar + uppercase kicker, top-left
-  - number cover: figure + gold unit on one baseline, then a headline that says what it means
-  - headline cover: a big Playfair question/statement, up to three lines, gold rule
+  - white accent bar + uppercase kicker, top-left
+  - number cover: figure + white unit on one baseline, then a headline that says what it means
+  - headline cover: a big Playfair question/statement, up to three lines, white rule
   - white logo bottom-left with a GUARANTEED clear band above it
 """
 import os
@@ -18,7 +18,8 @@ PF700 = os.path.join(ASSETS, "fonts", "playfair-700.ttf")
 IN600 = os.path.join(ASSETS, "fonts", "inter-600.ttf")
 LOGO = os.path.join(ASSETS, "logo-white.png")
 
-GOLD, CREAM, DARKW = (0xC2, 0xAA, 0x84), (0xF7, 0xF3, 0xEB), (0x1B, 0x18, 0x14)
+# Monochrome since the site redesign (2026-10): the accent (kicker bar, unit, rule) is white, not gold.
+GOLD, CREAM, DARKW = (0xFF, 0xFF, 0xFF), (0xF7, 0xF6, 0xF2), (0x1F, 0x1F, 0x1D)
 W, H, PAD = 1920, 1080, 127          # 1920x1080 per the guide; PAD scaled from the 1600px prototype
 S = W / 1600.0                        # scale factor vs the prototype so all metrics stay proportional
 MAXW = int(W * 0.44)
