@@ -40,11 +40,17 @@ from _render import _wrap  # noqa: E402
 
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets")
 IN600 = os.path.join(ASSETS, "fonts", "inter-600.ttf")
+IN500 = os.path.join(ASSETS, "fonts", "inter-500.ttf")
+IN400 = os.path.join(ASSETS, "fonts", "inter-400.ttf")
 PF700 = os.path.join(ASSETS, "fonts", "playfair-700.ttf")
+PF400 = os.path.join(ASSETS, "fonts", "playfair-400.ttf")
+PF900 = os.path.join(ASSETS, "fonts", "playfair-900.ttf")
 
-GOLD = (0xFF, 0xFF, 0xFF)  # monochrome accent since 2026-10 (was gold #C2AA84)
-CREAM = (0xF7, 0xF3, 0xEB)
-MUTED = (0xD8, 0xD2, 0xC4)
+# Brand tokens (api/brand_tokens.json, synced from nounda-agents/shared/brand): monochrome.
+GOLD = (0xFF, 0xFF, 0xFF)  # the accent is white since 2026-10 (name kept for callers)
+CREAM = (0xF7, 0xF6, 0xF2)
+MUTED = (0xB3, 0xB3, 0xAD)
+INK = (0x1F, 0x1F, 0x1D)
 
 W, H = 1080, 1920
 MARGIN = 84          # matches the platform right-side button-column keepout
@@ -73,57 +79,90 @@ def _fit_wrapped(draw, text, font_path, max_w, start_size, min_size, max_lines):
     return f, _wrap(text, f, max_w, draw)
 
 
-def render_caption(hook_text: str, supporting_line: str = "") -> Image.Image:
+def _split_hook(text):
+    """Two-weight hook like the site's "France, / clearly.": the set-up in regular, the last
+    one to three words (at most 16 characters) in black."""
+    words = text.split()
+    k = len(words)
+    while k > 1 and len(" ".join(words[k - 1:])) <= 16 and len(words) - (k - 1) <= 3:
+        k -= 1
+    return " ".join(words[:k]), " ".join(words[k:])
+
+
+def _glass(size, radius=24):
+    """The glass card on video (brand surface "glass"): warm dark tint, grain, a hairline
+    border and a top sheen. The overlay cannot blur the footage behind it, so the frost is
+    built from the tint and grain, like the video plates."""
+    from PIL import ImageFilter
+    w, h = size
+    card = Image.new("RGBA", size, (0, 0, 0, 0))
+    tint = Image.new("RGBA", size, (31, 31, 29, 0))
+    td = ImageDraw.Draw(tint)
+    for y in range(h):  # 160deg-ish: lighter at the top
+        a = int(222 - 14 * (1 - y / h))
+        td.line([(0, y), (w, y)], fill=(40 + int(18 * (1 - y / h)), 39 + int(18 * (1 - y / h)), 36 + int(18 * (1 - y / h)), a))
+    noise = Image.effect_noise(size, 70).convert("L").point(lambda v: int(v * 0.10))
+    grain = Image.new("RGBA", size, (255, 255, 255, 0)); grain.putalpha(noise)
+    tint = Image.alpha_composite(tint, grain)
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, w - 1, h - 1], radius, fill=255)
+    card.paste(tint, (0, 0), mask)
+    d = ImageDraw.Draw(card)
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius, outline=(255, 255, 255, 56), width=2)
+    d.line([(radius, 2), (w - radius, 2)], fill=(255, 255, 255, 96), width=2)
+    shadow = Image.new("RGBA", (w + 120, h + 120), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle([60, 80, w + 60, h + 70], radius, fill=(0, 0, 0, 90))
+    return card, shadow.filter(ImageFilter.GaussianBlur(30))
+
+
+def _glow_text(img, xy, text, font, strength=0.8):
+    from PIL import ImageFilter
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text(xy, text, font=font, fill=(255, 255, 255, int(255 * strength)))
+    img = Image.alpha_composite(img, layer.filter(ImageFilter.GaussianBlur(26)))
+    img = Image.alpha_composite(img, layer.filter(ImageFilter.GaussianBlur(8)))
+    ImageDraw.Draw(img).text(xy, text, font=font, fill=(255, 255, 255, 255))
+    return img
+
+
+def render_caption(hook_text: str, supporting_line: str = "", label: str = "Field notes") -> Image.Image:
+    """Hook caption for Formats B and C (2026-10-28 audit): a glass card in the safe zone with a
+    tracked label, the hook in two weights (set-up Playfair 400, payoff Playfair 900 in white
+    with the glow) and the supporting line in Inter. Replaces the warm scrim and single weight."""
     hook_text = (hook_text or "").strip()
     supporting_line = (supporting_line or "").strip()
-
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-
-    hf, hook_lines = _fit_wrapped(d, hook_text, PF700, MAXW, start_size=92, min_size=48, max_lines=4)
-    hlh = int(hf.size * 1.15)
-
-    sf, sup_lines = (
-        _fit_wrapped(d, supporting_line, IN600, MAXW, start_size=36, min_size=26, max_lines=2)
-        if supporting_line else (None, [])
-    )
-    slh = int(sf.size * 1.3) if sf else 0
-
-    block_gap = 26
-    block_h = hlh * len(hook_lines)
-    if sup_lines:
-        block_h += block_gap + slh * len(sup_lines)
-
-    safe_h = SAFE_BOTTOM - SAFE_TOP
-    y0 = SAFE_TOP + max(0, (safe_h - block_h) // 2) - 40
-    y0 = max(SAFE_TOP - 40, min(y0, SAFE_BOTTOM - block_h))
-
-    # legibility: a soft dark gradient rising from the bottom, not a boxed card --
-    # reads as the shot naturally darkening toward the caption, not a UI element.
-    grad_h = min(H - y0 + 60, H)
-    grad = Image.new("L", (1, grad_h), 0)
-    for i in range(grad_h):
-        grad.putpixel((0, i), int(200 * (i / grad_h) ** 1.4))
-    grad = grad.resize((W, grad_h))
-    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    shadow.paste(Image.new("RGBA", (W, grad_h), (10, 8, 6, 255)), (0, H - grad_h), grad)
-    img = Image.alpha_composite(img, shadow)
+    pad = 54
+    inner = W - 2 * MARGIN - 2 * pad
+    set_up, payoff = _split_hook(hook_text)
+    rf, r_lines = _fit_wrapped(d, set_up, PF400, inner, start_size=72, min_size=44, max_lines=3) if set_up else (None, [])
+    bf, b_lines = _fit_wrapped(d, payoff, PF900, inner, start_size=96, min_size=56, max_lines=2) if payoff else (None, [])
+    sf, s_lines = _fit_wrapped(d, supporting_line, IN400, inner, start_size=32, min_size=26, max_lines=3) if supporting_line else (None, [])
+    lf = ImageFont.truetype(IN500, 24)
+    rows_h = (int(rf.size * 1.12) * len(r_lines) if rf else 0) + (int(bf.size * 1.04) * len(b_lines) if bf else 0)
+    card_h = pad + 30 + 34 + rows_h + ((28 + int(sf.size * 1.4) * len(s_lines)) if s_lines else 0) + pad
+    card_w = W - 2 * MARGIN
+    y0 = SAFE_TOP + max(0, (SAFE_BOTTOM - SAFE_TOP - card_h) // 2) - 40
+    y0 = max(SAFE_TOP - 80, min(y0, SAFE_BOTTOM - card_h))
+    card, shadow = _glass((card_w, card_h))
+    img.alpha_composite(shadow, (MARGIN - 60, y0 - 60))
+    img.alpha_composite(card, (MARGIN, y0))
     d = ImageDraw.Draw(img)
-
-    x = MARGIN + 28
-    d.rectangle([MARGIN, y0, MARGIN + 6, y0 + block_h], fill=GOLD)
-
-    y = y0
-    for ln in hook_lines:
-        d.text((x, y), ln, font=hf, fill=CREAM)
-        y += hlh
-
-    if sup_lines:
-        y += block_gap
-        for ln in sup_lines:
-            d.text((x, y), ln, font=sf, fill=MUTED)
-            y += slh
-
+    x, y = MARGIN + pad, y0 + pad
+    tx = x
+    for ch in (label or "Field notes").upper():
+        d.text((tx, y), ch, font=lf, fill=(247, 246, 242, 170)); tx += d.textlength(ch, font=lf) + 4
+    y += 30 + 34
+    for ln in r_lines:
+        d.text((x, y), ln, font=rf, fill=CREAM); y += int(rf.size * 1.12)
+    for ln in b_lines:
+        img = _glow_text(img, (x - 2, y), ln, bf); y += int(bf.size * 1.04)
+    d = ImageDraw.Draw(img)
+    if s_lines:
+        y += 34
+        for ln in s_lines:
+            d.text((x, y), ln, font=sf, fill=MUTED); y += int(sf.size * 1.4)
     return img
 
 
@@ -138,44 +177,32 @@ def render_chunk_scrim() -> Image.Image:
     """
     grad = Image.new("L", (1, CHUNK_SCRIM_H), 0)
     for i in range(CHUNK_SCRIM_H):
-        grad.putpixel((0, i), int(200 * (i / CHUNK_SCRIM_H) ** 1.4))
+        grad.putpixel((0, i), int(120 * (i / CHUNK_SCRIM_H) ** 1.6))
     grad = grad.resize((W, CHUNK_SCRIM_H))
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    img.paste(Image.new("RGBA", (W, CHUNK_SCRIM_H), (10, 8, 6, 255)), (0, H - CHUNK_SCRIM_H), grad)
+    img.paste(Image.new("RGBA", (W, CHUNK_SCRIM_H), (31, 31, 29, 255)), (0, H - CHUNK_SCRIM_H), grad)
     return img
 
 
 def render_chunk_caption(text: str, with_scrim: bool = True) -> Image.Image:
-    """A short (3-5 word) spoken-caption chunk, for Format A's word-timed overlay
-    sequence -- same editorial-serif visual language as render_caption() (Playfair,
-    gold rule, bottom-rising scrim) but sized for a transient phrase rather than a
-    standalone headline, since a run of these plays back-to-back across real speech.
-    """
+    """A short (3-5 word) spoken-caption chunk for Format A. Since the 2026-10-28 audit each
+    chunk sits on a small glass pill (the long-form subtitle surface) so it holds on bright
+    footage; the persistent scrim is still drawn under it when asked for, much softer."""
     text = (text or "").strip()
-
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-
-    f, lines = _fit_wrapped(d, text, PF700, MAXW, start_size=64, min_size=40, max_lines=2)
-    lh = int(f.size * 1.15)
-    block_h = lh * len(lines)
-
-    safe_h = SAFE_BOTTOM - SAFE_TOP
-    y0 = SAFE_TOP + max(0, (safe_h - block_h) // 2) - 40
-    y0 = max(SAFE_TOP - 40, min(y0, SAFE_BOTTOM - block_h))
-
-    # Callers that composite the scrim as its own persistent layer ask for text only, so
-    # the words can appear and clear exactly with the speech without the scrim blinking.
+    f, lines = _fit_wrapped(d, text, PF400, MAXW - 40, start_size=64, min_size=40, max_lines=2)
+    lh = int(f.size * 1.18)
+    tw = max(d.textlength(ln, font=f) for ln in lines) if lines else 0
+    pw, ph = int(tw + 2 * 40), int(lh * len(lines) + 2 * 26)
+    y0 = SAFE_TOP + max(0, (SAFE_BOTTOM - SAFE_TOP - ph) // 2)
     if with_scrim:
         img = Image.alpha_composite(img, render_chunk_scrim())
-        d = ImageDraw.Draw(img)
-
-    x = MARGIN + 28
-    d.rectangle([MARGIN, y0, MARGIN + 6, y0 + block_h], fill=GOLD)
-
-    y = y0
+    pill, shadow = _glass((pw, ph), radius=20)
+    img.alpha_composite(shadow, (MARGIN - 60, y0 - 60))
+    img.alpha_composite(pill, (MARGIN, y0))
+    d = ImageDraw.Draw(img)
+    y = y0 + 26 - int(f.size * 0.08)
     for ln in lines:
-        d.text((x, y), ln, font=f, fill=CREAM)
-        y += lh
-
+        d.text((MARGIN + 40, y), ln, font=f, fill=CREAM); y += lh
     return img

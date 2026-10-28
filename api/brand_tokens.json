@@ -1,0 +1,34 @@
+{
+  "_about": "Nounda brand tokens, the one source for every asset generator (site redesign of 2026-10, approved assets of 2026-10-28). Edit here, then run `node run/sync-brand.mjs` to copy into each repo. Social cards keep their colour photography and topic accents by decision (see socialCards).",
+  "color": {
+    "ink": "#1F1F1D",
+    "cream": "#F7F6F2",
+    "ground": "#CFCDC6",
+    "groundLight": "#E4E2DC",
+    "stone": "#EBEAE4",
+    "muted": "#5E5D58",
+    "mutedOnDark": "#B3B3AD",
+    "white": "#FFFFFF",
+    "rule": "rgba(31,31,29,0.14)",
+    "ruleOnDark": "rgba(247,246,242,0.16)"
+  },
+  "surface": {
+    "field": { "about": "Light grey grained wash, ink type (thumbnails, list panels, light slides)", "fill": ["rgba(206,204,198,0.96)", "rgba(196,194,188,0.88)"], "grain": 0.32, "ink": "#1F1F1D" },
+    "glass": { "about": "Dark frosted card, cream type (chapter cards, labels over footage, callouts)", "fill": ["rgba(58,57,54,0.74)", "rgba(31,31,29,0.70)"], "border": "rgba(255,255,255,0.22)", "sheen": "rgba(255,255,255,0.35)", "radius": 12, "grain": 0.22, "ink": "#F7F6F2" }
+  },
+  "glow": {
+    "about": "The highlight: white lit from behind. Chip = ink type on white with a three-layer halo; text = glowing white type.",
+    "chipHalo": ["0 0 70px rgba(255,255,255,0.30)", "0 0 26px rgba(255,255,255,0.60)", "0 0 7px rgba(255,255,255,0.90)"],
+    "text": ["0 0 26px rgba(255,255,255,0.45)", "0 0 8px rgba(255,255,255,0.70)"],
+    "breatheSeconds": 3.4
+  },
+  "type": {
+    "display": "Playfair Display",
+    "displayWeights": { "setUp": 400, "payoff": 900 },
+    "body": "Inter",
+    "bodyWeights": { "body": 400, "label": 500, "strong": 600 },
+    "label": { "tracking": "0.16em", "case": "upper" },
+    "emailDisplay": "Georgia"
+  },
+  "socialCards": { "about": "Kept in colour (Daniil, 2026-10-28)", "accents": { "default": "#C2AA84", "tax": "#4A6274", "formation": "#A8654B" } }
+}
