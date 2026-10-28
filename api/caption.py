@@ -23,7 +23,7 @@ short-form-pipeline/design-samples/ for the comparison renders):
     rather than an Instagram-meme centred caption
   - a soft dark gradient rising from the bottom instead of a boxed/rounded card --
     legible over any b-roll without reading as a UI element pasted on top of the shot
-  - a thin gold vertical rule to the left of the text block, the section-label accent
+  - a thin white vertical rule to the left of the text block, the section-label accent
     used everywhere else in the brand system, doing here what the horizontal rule +
     centring did in the first pass
 Layout constraints unchanged from the first pass, per SHORT-FORM-CONTENT-PRODUCT-SHEET.md's
@@ -42,7 +42,7 @@ ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets"
 IN600 = os.path.join(ASSETS, "fonts", "inter-600.ttf")
 PF700 = os.path.join(ASSETS, "fonts", "playfair-700.ttf")
 
-GOLD = (0xC2, 0xAA, 0x84)
+GOLD = (0xFF, 0xFF, 0xFF)  # monochrome accent since 2026-10 (was gold #C2AA84)
 CREAM = (0xF7, 0xF3, 0xEB)
 MUTED = (0xD8, 0xD2, 0xC4)
 
