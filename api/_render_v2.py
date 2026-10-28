@@ -74,8 +74,45 @@ def _glow_text(img, xy, text, font, fill=(255, 255, 255), glow=(255, 255, 255), 
     return img
 
 
+LINE_W = 930  # the headline column ends before the presenter's feathered edge
+
+
+def _fit_lines(text, path, start, floor, max_lines, draw):
+    """Largest size from start down to floor at which text wraps into max_lines within LINE_W."""
+    size = start
+    while True:
+        f = ImageFont.truetype(path, size)
+        lines, line = [], ""
+        for w in text.split():
+            trial = (line + " " + w).strip()
+            if draw.textlength(trial, font=f) <= LINE_W or not line:
+                line = trial
+            else:
+                lines.append(line); line = w
+        lines.append(line)
+        if (len(lines) <= max_lines and all(draw.textlength(l, font=f) <= LINE_W for l in lines)) or size <= floor:
+            return f, lines
+        size -= 4
+
+
+def field_lines(c):
+    """The two-weight headline: line1 in regular, line2 (the short hook) in black, like the site's
+    "France, / clearly.". Returns (line1, line2, black_first). The Visual director writes line1 and
+    line2 itself; older concepts are split here, keeping the black line to the last 1 to 3 words."""
+    if c.get("line1") or c.get("line2"):
+        return (c.get("line1") or "").strip(), (c.get("line2") or "").strip(), False
+    if (c.get("number") or "").strip():
+        return (c.get("supporting") or "").strip(), f"{c['number'].strip()} {(c.get('word') or '').strip()}".strip(), True
+    words = (c.get("headline") or "").split()
+    k = len(words)
+    while k > 1 and len(" ".join(words[k - 1:])) <= 16 and len(words) - (k - 1) <= 3:
+        k -= 1
+    return " ".join(words[:k]), " ".join(words[k:]), False
+
+
 def field(portrait, c):
-    """Light tonal ground like the site hero; presenter feathered in on the right."""
+    """Approved template (Daniil, 2026-10-28): light tonal ground like the site hero, the
+    presenter feathered in on the right, a two-weight Playfair headline, tracked labels."""
     base = _backdrop(portrait, GREY, 0.62, 70)
     pr = _cover(portrait, 1000, H, 0.62, 0.3)
     pr = ImageEnhance.Color(pr).enhance(0.55)
@@ -83,12 +120,28 @@ def field(portrait, c):
     base.paste(pr, (W - 1000, 0), _hgrad(1000, H, 0, 300, 0, 255))
     img = _grain(base, 0.08).convert("RGBA")
     d = ImageDraw.Draw(img)
-    _label(d, (M, M - 6), c["label"], (31, 31, 29, 170))
-    _label(d, (W - M - 150, M - 6), c["index"], (31, 31, 29, 170))
-    reg, blk = ImageFont.truetype(PF400, 142), ImageFont.truetype(PF900, 160)
-    y = 330
-    d.text((M - 8, y), c["line1"], font=reg, fill=INK)
-    d.text((M - 10, y + 152), c["line2"], font=blk, fill=INK)
+    _label(d, (M, M - 6), c.get("label") or "Field notes", (31, 31, 29, 170))
+    if c.get("index"):
+        f = ImageFont.truetype(IN500, 26)
+        tw = sum(d.textlength(ch, font=f) + 6 for ch in c["index"])
+        _label(d, (int(W - M - tw), M - 6), c["index"], (31, 31, 29, 170))
+    line1, line2, black_first = field_lines(c)
+    def best(text, path, start, floor, max_lines):
+        # fewest lines first: one line at any size down to floor, then two, then three
+        for n in range(1, max_lines + 1):
+            f, ls = _fit_lines(text, path, start, floor, n, d)
+            if len(ls) <= n and all(d.textlength(l, font=f) <= LINE_W for l in ls):
+                return f, ls
+        return f, ls
+    reg, l1 = best(line1, PF400, 132, 84, 3) if line1 else (None, [])
+    blk, l2 = best(line2, PF900, 168, 104, 2) if line2 else (None, [])
+    rows = [(blk, ln, -10) for ln in l2] + [(reg, ln, -8) for ln in l1] if black_first \
+        else [(reg, ln, -8) for ln in l1] + [(blk, ln, -10) for ln in l2]
+    lh = lambda f: int(f.size * (0.98 if f is blk else 1.06))
+    block = sum(lh(f) for f, _, _ in rows)
+    y = max(220, (H - block) // 2 - 10)
+    for f, ln, dx in rows:
+        d.text((M + dx, y), ln, font=f, fill=INK); y += lh(f)
     d.line([(M, H - M), (M + 560, H - M)], fill=(31, 31, 29, 90), width=2)
     _label(d, (M, H - M + 22), "Nounda · Field notes", (31, 31, 29, 150), 22, 5)
     return img.convert("RGB")

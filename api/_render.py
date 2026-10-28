@@ -76,7 +76,12 @@ def _tracked(draw, xy, text, font, fill, tracking):
 
 
 def render_cover(portrait: Image.Image, concept: dict) -> Image.Image:
-    """portrait: PIL image of the generated avatar. concept: the cover_concept dict."""
+    """portrait: PIL image of the generated avatar. concept: the cover_concept dict.
+    Default layout since 2026-10-28 is the approved "field note" (_render_v2.field);
+    "layout": "classic" keeps the old dark template."""
+    if (concept.get("layout") or "field") != "classic":
+        from _render_v2 import field
+        return field(portrait, concept)
     number = (concept.get("number") or "").strip()
     word = (concept.get("word") or "").strip()
     supporting = (concept.get("supporting") or "").strip()
