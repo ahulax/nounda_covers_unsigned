@@ -125,7 +125,7 @@ def _glow_text(img, xy, text, font, strength=0.8):
     return img
 
 
-def _glass_deco(img, box, radius):
+def _glass_deco(img, box, radius, light=False):
     """What the overlay draws for a frosted panel (the blur itself is done by ffmpeg through the
     matching mask): a light dark tint for legibility, a faint white lift, grain, a bright hairline
     border and a top sheen, like the approved thumbnail option B card."""
@@ -133,8 +133,8 @@ def _glass_deco(img, box, radius):
     w, h = x1 - x0, y1 - y0
     layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     m = Image.new("L", (w, h), 0); ImageDraw.Draw(m).rounded_rectangle([0, 0, w - 1, h - 1], radius, fill=255)
-    tint = Image.new("RGBA", (w, h), (31, 31, 29, 92))
-    tint = Image.alpha_composite(tint, Image.new("RGBA", (w, h), (255, 255, 255, 14)))
+    tint = Image.new("RGBA", (w, h), (31, 31, 29, 58 if light else 92))
+    tint = Image.alpha_composite(tint, Image.new("RGBA", (w, h), (255, 255, 255, 10 if light else 14)))
     noise = Image.effect_noise((w, h), 70).convert("L").point(lambda v: int(v * 0.08))
     g = Image.new("RGBA", (w, h), (255, 255, 255, 0)); g.putalpha(noise)
     tint = Image.alpha_composite(tint, g)
@@ -155,40 +155,45 @@ def _mask(boxes, radius):
 
 
 def render_caption(hook_text: str, supporting_line: str = "", label: str = "Field notes", mask: bool = False) -> Image.Image:
-    """Hook caption for Formats B and C: a real frosted glass card (ffmpeg blurs the footage
-    through the mask=True version of this layout), with a tracked label, the hook in two weights
+    """Hook caption for Formats B and C: a compact frosted glass card (ffmpeg blurs the footage
+    through the mask=True version of this layout) with a tracked label, the hook in two weights
     (set-up Playfair 400, payoff Playfair 900 in white with the glow) and the supporting line.
-    Anchored low in the safe zone so most of the picture stays open."""
+    Daniil, 2026-10-30: the full-width card covered a quarter of the frame and hid the footage, so
+    the card now hugs its text, the type is smaller and the glass is lighter, low in the safe zone."""
     hook_text = (hook_text or "").strip()
     supporting_line = (supporting_line or "").strip()
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    pad = 54
-    inner = W - 2 * MARGIN - 2 * pad
+    pad_x, pad_y = 36, 30
+    inner = W - 2 * MARGIN - 2 * pad_x - 60
     set_up, payoff = _split_hook(hook_text)
-    rf, r_lines = _fit_wrapped(d, set_up, PF400, inner, start_size=68, min_size=42, max_lines=3) if set_up else (None, [])
-    bf, b_lines = _fit_wrapped(d, payoff, PF900, inner, start_size=88, min_size=52, max_lines=2) if payoff else (None, [])
-    sf, s_lines = _fit_wrapped(d, supporting_line, IN400, inner, start_size=30, min_size=24, max_lines=3) if supporting_line else (None, [])
-    lf = ImageFont.truetype(IN500, 24)
-    rows_h = (int(rf.size * 1.12) * len(r_lines) if rf else 0) + (int(bf.size * 1.04) * len(b_lines) if bf else 0)
-    card_h = pad + 30 + 40 + rows_h + ((30 + int(sf.size * 1.4) * len(s_lines)) if s_lines else 0) + pad
-    box = (MARGIN, SAFE_BOTTOM - card_h - 20, W - MARGIN, SAFE_BOTTOM - 20)
+    rf, r_lines = _fit_wrapped(d, set_up, PF400, inner, start_size=52, min_size=36, max_lines=3) if set_up else (None, [])
+    bf, b_lines = _fit_wrapped(d, payoff, PF900, inner, start_size=62, min_size=42, max_lines=2) if payoff else (None, [])
+    sf, s_lines = _fit_wrapped(d, supporting_line, IN400, inner, start_size=26, min_size=22, max_lines=2) if supporting_line else (None, [])
+    lf = ImageFont.truetype(IN500, 20)
+    lab = (label or "Field notes").upper()
+    lab_w = sum(d.textlength(ch, font=lf) + 4 for ch in lab)
+    widths = [lab_w] + [d.textlength(ln, font=rf) for ln in r_lines] + [d.textlength(ln, font=bf) for ln in b_lines] + [d.textlength(ln, font=sf) for ln in s_lines]
+    card_w = int(max(widths) + 2 * pad_x)
+    rows_h = (int(rf.size * 1.12) * len(r_lines) if rf else 0) + (int(bf.size * 1.06) * len(b_lines) if bf else 0)
+    card_h = pad_y + 22 + 22 + rows_h + ((18 + int(sf.size * 1.4) * len(s_lines)) if s_lines else 0) + pad_y - 6
+    box = (MARGIN, SAFE_BOTTOM - card_h - 20, MARGIN + card_w, SAFE_BOTTOM - 20)
     if mask:
-        return _mask([box], 30)
-    img = _glass_deco(img, box, 30)
+        return _mask([box], 22)
+    img = _glass_deco(img, box, 22, light=True)
     d = ImageDraw.Draw(img)
-    x, y = box[0] + pad, box[1] + pad
+    x, y = box[0] + pad_x, box[1] + pad_y
     tx = x
-    for ch in (label or "Field notes").upper():
-        d.text((tx, y), ch, font=lf, fill=(247, 246, 242, 200)); tx += d.textlength(ch, font=lf) + 4
-    y += 30 + 40
+    for ch in lab:
+        d.text((tx, y), ch, font=lf, fill=(247, 246, 242, 210)); tx += d.textlength(ch, font=lf) + 4
+    y += 22 + 22
     for ln in r_lines:
         d.text((x, y), ln, font=rf, fill=CREAM); y += int(rf.size * 1.12)
     for ln in b_lines:
-        img = _glow_text(img, (x - 2, y), ln, bf); y += int(bf.size * 1.04)
+        img = _glow_text(img, (x - 2, y), ln, bf); y += int(bf.size * 1.06)
     d = ImageDraw.Draw(img)
     if s_lines:
-        y += 30
+        y += 18
         for ln in s_lines:
             d.text((x, y), ln, font=sf, fill=(235, 234, 229)); y += int(sf.size * 1.4)
     return img
