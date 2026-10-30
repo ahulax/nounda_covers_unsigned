@@ -144,7 +144,7 @@ async function renderClip(workDir, index, clip, fields) {
     "[0:v]scale=1080:1920:force_original_aspect_ratio=increase," +
     `crop=1080:1920:x='min(max(iw*${cropCenter(fields, clip)}-540,0),iw-1080)':y=0,setsar=1,fps=30[bg];` +
     // input 1 is the scrim: on for the entire clip, so it never blinks between phrases.
-    "[bg][1:v]overlay=0:0[scr];[scr]split[base][bsrc];[bsrc]gblur=sigma=30,eq=brightness=0.02[blur];[2:v]null[k0]";
+    "[bg][1:v]overlay=0:0[scr];[scr]split[base][bsrc];[bsrc]scale=540:960,gblur=sigma=15,scale=1080:1920,eq=brightness=0.02[blur];[2:v]null[k0]";
   chunks.forEach((chunk, i) => {
     filter += `;[k${i}][${maskBase + i}:v]overlay=0:0:enable='between(t,${chunk.start},${chunk.end})'[k${i + 1}]`;
   });
@@ -163,7 +163,7 @@ async function renderClip(workDir, index, clip, fields) {
 
   args.push(
     "-filter_complex", filter, "-map", "[vout]", "-map", "0:a?",
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", "-threads", "2",
     "-c:a", "aac", "-b:a", "128k",
     segmentPath
   );
@@ -268,7 +268,11 @@ module.exports = async (req, res) => {
   try {
     const fields = await fetchAirtableRecord(VIDEO_BASE_ID, VIDEO_TABLE_ID, recordId);
     if (body.crop_center) fields.__cropCenter = body.crop_center;
-    const segmentPaths = await Promise.all(clips.map((c, i) => renderClip(workDir, i, c, fields)));
+    // One clip at a time: since the real frosted glass (each spoken chunk adds a caption and a
+    // mask input, plus a full-frame blur), two clips in parallel ran out of memory on Vercel
+    // (2026-10-30, every cutdown killed at ~40 s).
+    const segmentPaths = [];
+    for (const [i, c] of clips.entries()) segmentPaths.push(await renderClip(workDir, i, c, fields));
 
     await joinSegments(segmentPaths, listPath, outputPath);
 
