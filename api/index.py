@@ -5,7 +5,7 @@ Make (S31) calls this once. Everything slow or fiddly happens here, not in Make:
   2. create a PiAPI task with the LOCKED avatar reference image
   3. poll server-side until the portrait is ready
   4. composite the 1920x1080 cover (api/_render.py)
-  5. upload portrait + cover to Cloudinary
+  5. upload portrait + cover to Cloudflare R2
   6. return { portrait_url, thumbnail_url }
 
 Request body (normal path — Make generates the portrait, this composites it):
@@ -172,30 +172,19 @@ def fetch_image(url):
 
 
 def upload(img_bytes, public_id):
-    """Unsigned Cloudinary upload. Returns the secure URL."""
-    if not (CLOUD and PRESET):
-        raise RuntimeError("CLOUDINARY_CLOUD / CLOUDINARY_PRESET are not set")
-    boundary = "----noundacover"
-    parts = []
-    for key, val in (("upload_preset", PRESET), ("public_id", public_id)):
-        parts.append(
-            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{val}\r\n".encode()
-        )
-    parts.append(
-        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{public_id}.jpg\"\r\n"
-        f"Content-Type: image/jpeg\r\n\r\n".encode()
-    )
-    parts.append(img_bytes)
-    parts.append(f"\r\n--{boundary}--\r\n".encode())
-    body = b"".join(parts)
-    req = urllib.request.Request(
-        f"https://api.cloudinary.com/v1_1/{CLOUD}/image/upload",
-        data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-        method="POST",
-    )
-    with _urlopen(req, timeout=60) as r:
-        return json.loads(r.read().decode())["secure_url"]
+    """Upload a JPEG to Cloudflare R2 (Cloudinary was dropped in Nov 2026 when the free plan ran
+    out). The key mirrors the old public id, so names stay readable. Returns the public URL."""
+    need = ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "R2_PUBLIC_URL")
+    if not all(os.environ.get(k) for k in need):
+        raise RuntimeError("R2_* env vars are not set")
+    import boto3
+    s3 = boto3.client("s3", endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
+                      aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+                      aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"], region_name="auto")
+    key = f"img/{public_id}.jpg"
+    s3.put_object(Bucket=os.environ["R2_BUCKET"], Key=key, Body=img_bytes, ContentType="image/jpeg",
+                  CacheControl="public, max-age=31536000, immutable")
+    return f"{os.environ['R2_PUBLIC_URL'].rstrip('/')}/{key}"
 
 
 # --- /api/video-url: mint a fresh presigned S3 URL on demand -------------------
